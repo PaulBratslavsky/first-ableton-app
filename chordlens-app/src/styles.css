@@ -1,0 +1,366 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0e1014;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --line: #2a2f3a;
+  --text: #e8eaf0;
+  --muted: #8a90a0;
+  --accent: #4ade80;
+  --accent-dim: #2bbf63;
+  --accent-soft: rgba(74, 222, 128, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+}
+
+/* ---- Header ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.app-brand h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+.app-tagline {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---- Controls row ---- */
+.app-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---- Key badge ---- */
+.key-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 6px 5px 12px;
+  font-size: 13px;
+}
+.key-badge-label { color: var(--muted); }
+.key-badge-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+/* ---- Pin button ---- */
+.pin-btn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pin-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
+.pin-btn:disabled { opacity: 0.45; cursor: default; }
+.pin-btn--active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- Progression strip ---- */
+.progression {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.progression-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.progression-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: thin;
+}
+.progression-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+.chord-chip {
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.progression-clear {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.progression-clear:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
+.progression-clear:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- Roman numeral ---- */
+.roman {
+  margin-left: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0.5px;
+}
+
+/* ---- MIDI input picker (desktop) ---- */
+.input-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 6px 5px 12px;
+  font-size: 13px;
+}
+.input-picker-label {
+  color: var(--muted);
+}
+.input-picker-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  max-width: 220px;
+}
+.input-picker-refresh {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.input-picker-refresh:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+/* ---- Status indicator ---- */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px 6px 12px;
+  font-size: 13px;
+}
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.status-dot--listening { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.status-dot--no-input { background: var(--muted); }
+.status-dot--demo { background: #5aa9ff; }
+.status-label { color: var(--muted); }
+.status-demo-btn {
+  margin-left: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.status-demo-btn:hover { border-color: var(--accent-dim); color: var(--accent); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---- Panels ---- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+}
+.panel--hero {
+  margin-bottom: 16px;
+  padding: 18px 22px 22px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.panel--notation {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+}
+
+.view-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.view-title--row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.now-playing {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  text-transform: none;
+}
+.idle-hint {
+  margin: 14px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  /* Reserve room for up to two lines so the hint never resizes the panel,
+     whether it's hidden (playing), short, or wraps at narrow widths. */
+  min-height: 2.2em;
+}
+
+/* ---- Piano ---- */
+.piano {
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+  display: block;
+}
+.key--white {
+  fill: #f4f6fb;
+  stroke: #11141a;
+  stroke-width: 1;
+}
+.key--black {
+  fill: #11141a;
+  stroke: #000;
+  stroke-width: 1;
+}
+/* Held-key fill comes from an inline per-note color; just soften the stroke. */
+.key--held { stroke: rgba(0, 0, 0, 0.35); }
+.key--outside { stroke: #f4f6fb; stroke-width: 2; stroke-dasharray: 3 2; }
+.key-label {
+  fill: #7c8295;
+  font-size: 9px;
+  text-anchor: middle;
+}
+
+/* ---- Fretboard ---- */
+.fretboard svg,
+.notation svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.fb-surface { fill: #20160f; }
+.fb-fret { stroke: #4a4f5c; stroke-width: 1.5; }
+.fb-nut { stroke: #cdd2dd; stroke-width: 4; }
+.fb-string { stroke: #9aa0b0; stroke-width: 1.2; }
+.fb-inlay { fill: #3a4150; }
+.fb-fret-num { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+.fb-open-label { fill: var(--muted); font-size: 11px; text-anchor: end; dominant-baseline: middle; }
+/* Dot fill is an inline per-note color. */
+.fb-note { stroke: rgba(0, 0, 0, 0.4); stroke-width: 1; }
+.fb-note--outside { stroke: #f4f6fb; stroke-width: 2; stroke-dasharray: 3 2; }
+.fb-note-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+/* ---- Notation ---- */
+.notation { margin: 0; width: 100%; }
+.notation .view-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.chord-symbol {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0.5px;
+}
+.notation-canvas {
+  background: #f7f8fb;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  padding: 6px;
+}
+
+@media (max-width: 720px) {
+  .grid { grid-template-columns: 1fr; }
+}
