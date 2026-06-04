@@ -40,11 +40,17 @@ interface Props {
   heldNotes: Set<number>
   /** Pitch-classes in the current key; held notes outside it get flagged. */
   keyPcs?: Set<number> | null
+  /** When set, faintly mark in-scale keys that aren't currently held. */
+  scaleGuide?: Set<number> | null
 }
 
-export function PianoView({ heldNotes, keyPcs }: Props) {
+export function PianoView({ heldNotes, keyPcs, scaleGuide }: Props) {
   const outside = (pitch: number) =>
     keyPcs != null && !keyPcs.has(pitchClass(pitch))
+  const inScale = (pitch: number) =>
+    scaleGuide != null &&
+    scaleGuide.has(pitchClass(pitch)) &&
+    !heldNotes.has(pitch)
 
   return (
     <svg
@@ -71,6 +77,15 @@ export function PianoView({ heldNotes, keyPcs }: Props) {
               }`}
               style={held ? { fill: pitchColor(k.pitch) } : undefined}
             />
+            {inScale(k.pitch) && (
+              <circle
+                cx={k.x + WHITE_W / 2}
+                cy={WHITE_H - 24}
+                r={3.2}
+                className="key-scale-dot"
+                style={{ fill: pitchColor(k.pitch) }}
+              />
+            )}
             {isC && (
               <text x={k.x + WHITE_W / 2} y={WHITE_H - 8} className="key-label">
                 {noteName(k.pitch)}
@@ -84,18 +99,28 @@ export function PianoView({ heldNotes, keyPcs }: Props) {
       {blackKeys.map((k) => {
         const held = heldNotes.has(k.pitch)
         return (
-          <rect
-            key={k.pitch}
-            x={k.x}
-            y={0}
-            width={BLACK_W}
-            height={BLACK_H}
-            rx={2}
-            className={`key key--black${held ? ' key--held' : ''}${
-              held && outside(k.pitch) ? ' key--outside' : ''
-            }`}
-            style={held ? { fill: pitchColor(k.pitch) } : undefined}
-          />
+          <g key={k.pitch}>
+            <rect
+              x={k.x}
+              y={0}
+              width={BLACK_W}
+              height={BLACK_H}
+              rx={2}
+              className={`key key--black${held ? ' key--held' : ''}${
+                held && outside(k.pitch) ? ' key--outside' : ''
+              }`}
+              style={held ? { fill: pitchColor(k.pitch) } : undefined}
+            />
+            {inScale(k.pitch) && (
+              <circle
+                cx={k.x + BLACK_W / 2}
+                cy={BLACK_H - 12}
+                r={3}
+                className="key-scale-dot"
+                style={{ fill: pitchColor(k.pitch) }}
+              />
+            )}
+          </g>
         )
       })}
     </svg>

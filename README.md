@@ -15,6 +15,7 @@ Play a chord on Push and immediately *see* it four ways: where it sits on a pian
 - **Live chord detection** — the detected chord symbol shows above the keyboard and on the staff (e.g. `Cmaj7`, `Am`, `G/B`).
 - **Chord progression history** — a strip records the chords you settle on (`C · Am · Fmaj7`), each chip tinted by its root; **Clear** to reset.
 - **Key & scale awareness** — auto-detects the key (with a manual override), shows the chord's **Roman numeral** (e.g. `IIm7 · V7 · I`), spells accidentals to match the key (sharps or flats), and flags **out-of-key** notes with a dashed outline.
+- **Scale overlay** — the **Scale** toggle faintly traces the whole detected key across the piano and both fretboards, so you can see where your chord sits within the scale (played notes stay bold on top).
 - **Pin / freeze a voicing** — press **Space** (or the **Pin** button) to freeze the current chord so you can study its shapes after letting go.
 - **Demo mode** — cycles sample chords so you can see everything without any MIDI connected.
 

@@ -63,6 +63,8 @@ function Visualizer() {
   const { key, isAuto, setManualKey } = useKeyEstimate(pitches, frozen)
   const useFlats = key ? usesFlats(key) : false
   const keyPcs = useMemo(() => (key ? scalePcs(key) : null), [key])
+  const [showScale, setShowScale] = useState(true)
+  const scaleGuide = showScale ? keyPcs : null
 
   const chord = detectChord(displayPitches, useFlats)
   const roman = key ? romanNumeral(chord?.chordSymbol ?? null, key) : null
@@ -97,6 +99,14 @@ function Visualizer() {
           <KeyBadge value={key} isAuto={isAuto} onPick={setManualKey} />
           <button
             type="button"
+            className={`pin-btn${showScale ? ' pin-btn--active' : ''}`}
+            onClick={() => setShowScale((s) => !s)}
+            title="Faintly show the whole key across the views"
+          >
+            Scale
+          </button>
+          <button
+            type="button"
             className={`pin-btn${frozen ? ' pin-btn--active' : ''}`}
             onClick={togglePin}
             disabled={!frozen && heldNotes.size === 0}
@@ -119,7 +129,7 @@ function Visualizer() {
             {roman && <span className="roman">{roman}</span>}
           </span>
         </div>
-        <PianoView heldNotes={displayNotes} keyPcs={keyPcs} />
+        <PianoView heldNotes={displayNotes} keyPcs={keyPcs} scaleGuide={scaleGuide} />
         {/* Always rendered (hidden while playing) so the panel never resizes. */}
         <p className="idle-hint" style={{ visibility: isIdle ? 'visible' : 'hidden' }}>
           {status === 'no-input'
@@ -136,6 +146,7 @@ function Visualizer() {
             fretCount={FRET_COUNT}
             heldNotes={displayNotes}
             keyPcs={keyPcs}
+            scaleGuide={scaleGuide}
             useFlats={useFlats}
           />
         </div>
@@ -146,6 +157,7 @@ function Visualizer() {
             fretCount={FRET_COUNT}
             heldNotes={displayNotes}
             keyPcs={keyPcs}
+            scaleGuide={scaleGuide}
             useFlats={useFlats}
           />
         </div>

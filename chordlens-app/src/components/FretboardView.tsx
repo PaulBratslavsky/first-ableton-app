@@ -20,6 +20,8 @@ interface Props {
   label: string
   /** Pitch-classes in the current key; lit notes outside it get flagged. */
   keyPcs?: Set<number> | null
+  /** When set, faintly mark in-scale positions that aren't currently lit. */
+  scaleGuide?: Set<number> | null
   /** Spell note labels as flats to match the detected key. */
   useFlats?: boolean
 }
@@ -30,6 +32,7 @@ export function FretboardView({
   heldNotes,
   label,
   keyPcs,
+  scaleGuide,
   useFlats = false,
 }: Props) {
   const strings = tuning.length
@@ -43,6 +46,14 @@ export function FretboardView({
     f === 0 ? LABEL_W + OPEN_W / 2 : nutX + (f - 0.5) * FRET_W
 
   const lit = fretPositionsFor(heldNotes, tuning, fretCount)
+  const litKeys = new Set(lit.map((p) => `${p.string}-${p.fret}`))
+
+  // In-scale positions that aren't currently played (the faint scale guide).
+  const scaleDots = scaleGuide
+    ? fretPositionsFor(new Set(scaleGuide), tuning, fretCount).filter(
+        (p) => !litKeys.has(`${p.string}-${p.fret}`),
+      )
+    : []
 
   return (
     <figure className="fretboard">
@@ -117,6 +128,18 @@ export function FretboardView({
             </g>
           )
         })}
+
+        {/* Faint scale guide: in-key notes that aren't currently played. */}
+        {scaleDots.map(({ string, fret }) => (
+          <circle
+            key={`scale-${string}-${fret}`}
+            cx={fretCenterX(fret)}
+            cy={stringY(string)}
+            r={3.2}
+            className="fb-scale-dot"
+            style={{ fill: pitchColor(tuning[string] + fret) }}
+          />
+        ))}
 
         {/* Lit note positions. */}
         {lit.map(({ string, fret }) => {

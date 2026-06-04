@@ -314,6 +314,7 @@ body {
   font-size: 9px;
   text-anchor: middle;
 }
+.key-scale-dot { opacity: 0.5; }
 
 /* ---- Fretboard ---- */
 .fretboard svg,
@@ -332,6 +333,7 @@ body {
 /* Dot fill is an inline per-note color. */
 .fb-note { stroke: rgba(0, 0, 0, 0.4); stroke-width: 1; }
 .fb-note--outside { stroke: #f4f6fb; stroke-width: 2; stroke-dasharray: 3 2; }
+.fb-scale-dot { opacity: 0.32; }
 .fb-note-label {
   font-size: 9px;
   font-weight: 700;
