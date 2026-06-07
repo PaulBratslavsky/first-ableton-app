@@ -180,6 +180,17 @@ body {
   color: var(--accent);
 }
 
+/* Continuous progression sheet (its own panel below the piano). */
+.panel--sheet { padding-bottom: 12px; }
+.sheet-scroll { margin-top: 6px; }
+.progression-staff {
+  width: 100%;
+  background: #fbfbfd;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.progression-staff svg { display: block; width: 100%; }
+
 /* ---- Roman numeral ---- */
 .roman {
   margin-left: 10px;

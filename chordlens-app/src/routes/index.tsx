@@ -9,6 +9,7 @@ import { AbletonStatus } from '../components/AbletonStatus'
 import { InputPicker } from '../components/InputPicker'
 import { KeyBadge } from '../components/KeyBadge'
 import { ProgressionStrip } from '../components/ProgressionStrip'
+import { ProgressionStaff } from '../components/ProgressionStaff'
 import { PianoView } from '../components/PianoView'
 import { PushView } from '../components/PushView'
 import { FretboardView } from '../components/FretboardView'
@@ -100,6 +101,7 @@ function Visualizer() {
     historyLabel,
     liveChord?.bassPc ?? null,
     liveChord?.noteNames ?? [],
+    pitches,
   )
 
   const isIdle = displayPitches.length === 0
@@ -175,6 +177,20 @@ function Visualizer() {
             ? 'Choose a MIDI input above, or play into the ChordLens device in Ableton, to begin.'
             : 'Play something — the views will light up here.'}
         </p>
+      </section>
+
+      {/* Continuous notation sheet of the whole progression, lead-sheet style. */}
+      <section className="panel panel--sheet">
+        <div className="view-title">Progression · sheet</div>
+        <div className="sheet-scroll">
+          {history.length === 0 ? (
+            <p className="idle-hint" style={{ visibility: 'visible' }}>
+              Play a progression — it'll be written out here, chord by chord.
+            </p>
+          ) : (
+            <ProgressionStaff history={history} useFlats={useFlats} />
+          )}
+        </div>
       </section>
 
       <section className="grid">

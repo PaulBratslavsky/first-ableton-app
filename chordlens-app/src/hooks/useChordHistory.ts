@@ -6,6 +6,8 @@ export interface ChordHistoryEntry {
   rootPc: number | null
   /** Note names that made up the chord (for the "notes" view). */
   notes: string[]
+  /** Actual MIDI pitches of the voicing (for the "staff" notation view). */
+  pitches: number[]
 }
 
 const SETTLE_MS = 300 // a chord must be held this long to be recorded
@@ -22,11 +24,14 @@ export function useChordHistory(
   label: string | null,
   rootPc: number | null,
   notes: string[],
+  pitches: number[],
 ) {
   const [history, setHistory] = useState<ChordHistoryEntry[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const notesRef = useRef(notes)
   notesRef.current = notes
+  const pitchesRef = useRef(pitches)
+  pitchesRef.current = pitches
 
   useEffect(() => {
     if (!label) return
@@ -34,9 +39,10 @@ export function useChordHistory(
     timer.current = setTimeout(() => {
       setHistory((prev) => {
         if (prev.length && prev[prev.length - 1].label === label) return prev
-        return [...prev, { label, rootPc, notes: notesRef.current }].slice(
-          -MAX_ENTRIES,
-        )
+        return [
+          ...prev,
+          { label, rootPc, notes: notesRef.current, pitches: pitchesRef.current },
+        ].slice(-MAX_ENTRIES)
       })
     }, SETTLE_MS)
     return () => clearTimeout(timer.current)

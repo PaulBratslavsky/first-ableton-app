@@ -9,8 +9,8 @@ interface Props {
 
 /**
  * Horizontal strip of the chords you've played, oldest → newest. Toggle between
- * chord symbols (C · Am · F) and the actual notes (C E G · A C E) — handy for
- * reading a melody/voicing rather than its chord name.
+ * chord symbols (C · Am · F) and the actual note names (C E G · A C E). The
+ * full notation lives in the separate sheet below the piano.
  */
 export function ProgressionStrip({ history, onClear }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
