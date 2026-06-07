@@ -95,7 +95,11 @@ export function Notation(handle: Handle<Props>) {
     return (
       <figure className="notation">
         <figcaption className="view-title">
-          Notation <span className="chord-symbol">{chord?.chordSymbol ?? '—'}</span>
+          Notation{' '}
+          <span className="chord-symbol">
+            {chord?.chordSymbol ??
+              (chord?.noteNames?.length ? chord.noteNames.join(' · ') : '—')}
+          </span>
         </figcaption>
         <div className="notation-canvas" innerHTML={cachedSvg} />
       </figure>

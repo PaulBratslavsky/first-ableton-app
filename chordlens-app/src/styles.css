@@ -182,9 +182,10 @@ body {
 
 /* Continuous progression sheet (its own panel below the piano). */
 .panel--sheet { padding-bottom: 12px; margin-bottom: 16px; }
-.sheet-scroll { margin-top: 6px; }
+.sheet-scroll { margin-top: 6px; min-height: 232px; }
 .progression-staff {
   width: 100%;
+  min-height: 224px;
   background: #fbfbfd;
   border-radius: 8px;
   overflow: hidden;
@@ -325,6 +326,8 @@ body {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  min-height: 30px; /* reserve height so the changing note label can't shift layout */
+  gap: 12px;
 }
 .now-playing {
   font-size: 22px;
@@ -332,6 +335,8 @@ body {
   letter-spacing: 0.5px;
   color: var(--accent);
   text-transform: none;
+  white-space: nowrap; /* never wrap to a second line (would change row height) */
+  text-align: right;
 }
 .idle-hint {
   margin: 14px 0 0;
@@ -445,6 +450,7 @@ body {
   display: flex;
   justify-content: center;
   padding: 6px;
+  min-height: 280px; /* reserve the staff height so it never collapses mid-update */
 }
 
 /* ---- Push pad grid ---- */

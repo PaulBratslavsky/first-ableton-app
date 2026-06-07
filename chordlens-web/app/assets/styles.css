@@ -326,6 +326,8 @@ body {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  min-height: 30px; /* reserve height so the changing note label can't shift layout */
+  gap: 12px;
 }
 .now-playing {
   font-size: 22px;
@@ -333,6 +335,8 @@ body {
   letter-spacing: 0.5px;
   color: var(--accent);
   text-transform: none;
+  white-space: nowrap; /* never wrap to a second line (would change row height) */
+  text-align: right;
 }
 .idle-hint {
   margin: 14px 0 0;
