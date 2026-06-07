@@ -20,7 +20,7 @@ import { ProgressionStaff } from './progression-staff.tsx'
 import { KeyBadge } from './key-badge.tsx'
 
 const DECAY = 0.9
-const SETTLE_MS = 300
+const SETTLE_MS = 120
 const MAX_HISTORY = 24
 const DEMO_CHORDS = [
   [60, 64, 67],
@@ -30,7 +30,9 @@ const DEMO_CHORDS = [
   [60, 64, 67, 71],
   [62, 65, 69],
 ]
-const DEMO_STEP_MS = 1800
+// Hold time per chord (ms) — an actual rhythm so time-proportional sheet
+// spacing is visible without playing into Ableton.
+const DEMO_RHYTHM_MS = [1000, 350, 350, 800, 1400, 700]
 
 type Props = SerializableProps
 
@@ -155,25 +157,26 @@ export const Visualizer = clientEntry(
     function setDemo(onState: boolean) {
       demo = onState
       if (demoTimer) {
-        clearInterval(demoTimer)
+        clearTimeout(demoTimer)
         demoTimer = null
       }
       if (demo) {
         demoIndex = 0
         const tick = () => {
           midiHeld = new Set(DEMO_CHORDS[demoIndex % DEMO_CHORDS.length])
+          const hold = DEMO_RHYTHM_MS[demoIndex % DEMO_RHYTHM_MS.length]
           demoIndex++
           notesChanged()
+          demoTimer = setTimeout(tick, hold)
         }
         tick()
-        demoTimer = setInterval(tick, DEMO_STEP_MS)
       } else {
         midiHeld = new Set()
         notesChanged()
       }
     }
     handle.signal.addEventListener('abort', () => {
-      if (demoTimer) clearInterval(demoTimer)
+      if (demoTimer) clearTimeout(demoTimer)
     })
 
     // ---- Web MIDI (optional, browser only) ----
