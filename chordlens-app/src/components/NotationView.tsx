@@ -77,7 +77,9 @@ export function NotationView({ heldNotes, useFlats = false }: Props) {
 
   const pitches = [...heldNotes].sort((a, b) => a - b)
   const chord = detectChord(pitches, useFlats)
-  const chordSymbol = chord?.chordSymbol ?? null
+  // Fall back to note names so a single note still shows its letter (not "—").
+  const chordSymbol =
+    chord?.chordSymbol ?? (chord?.noteNames?.length ? chord.noteNames.join(' · ') : null)
 
   useEffect(() => {
     const el = containerRef.current

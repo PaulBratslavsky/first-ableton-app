@@ -94,7 +94,20 @@ export function useAbleton(url?: string): UseAbleton {
     const bridge = new AbletonBridge({
       url,
       onEvent: handleEvent,
-      onStatus: setStatus,
+      onStatus: (s) => {
+        setStatus(s)
+        // On (re)connect, pull the session via a CORRELATED request — its reply
+        // carries tempo/transport/key. A plain send()'s reply has no `type`
+        // field, so the event router drops it (that was the missing-BPM bug).
+        if (s === 'open') {
+          bridgeRef.current
+            ?.request('get_session', {})
+            .then((info) => {
+              if (info) handleEvent({ type: 'session', session: info as SessionInfo })
+            })
+            .catch(() => {})
+        }
+      },
     })
     bridgeRef.current = bridge
     bridge.connect()
@@ -124,7 +137,19 @@ export function useAbleton(url?: string): UseAbleton {
     bridgeRef.current?.send('create_midi_track', { index })
   }, [])
   const refreshSession = useCallback(() => {
-    bridgeRef.current?.send('get_session', {})
+    bridgeRef.current
+      ?.request('get_session', {})
+      .then((info) => {
+        if (!info) return
+        const s = info as SessionInfo
+        setSession(s)
+        if (s.tempo != null) setTempo(s.tempo)
+        setIsPlaying(s.isPlaying)
+        if (s.rootPc != null && s.scaleName != null) {
+          setLiveKey({ rootPc: s.rootPc, scaleName: s.scaleName })
+        }
+      })
+      .catch(() => {})
   }, [])
   const reconnect = useCallback(() => {
     // Refresh: drop stale local state (stuck keys, old transport), then

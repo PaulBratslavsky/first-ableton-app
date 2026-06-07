@@ -1,0 +1,23 @@
+{
+  "name": "chordlens-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --import remix/node-tsx server.ts",
+    "start": "node --import remix/node-tsx server.ts",
+    "test": "node --import remix/node-tsx --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24.3.0"
+  },
+  "dependencies": {
+    "remix": "^3.0.0-beta.4",
+    "tonal": "^6.4.3",
+    "vexflow": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}

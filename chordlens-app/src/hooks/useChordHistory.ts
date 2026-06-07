@@ -8,9 +8,11 @@ export interface ChordHistoryEntry {
   notes: string[]
   /** Actual MIDI pitches of the voicing (for the "staff" notation view). */
   pitches: number[]
+  /** ms timestamp when the chord became active — drives timing-accurate notation. */
+  t: number
 }
 
-const SETTLE_MS = 300 // a chord must be held this long to be recorded
+const SETTLE_MS = 120 // a chord must be held this long to be recorded (lower = less lag)
 const MAX_ENTRIES = 24
 
 /**
@@ -35,13 +37,14 @@ export function useChordHistory(
 
   useEffect(() => {
     if (!label) return
+    const onset = Date.now() // when this chord became active
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
       setHistory((prev) => {
         if (prev.length && prev[prev.length - 1].label === label) return prev
         return [
           ...prev,
-          { label, rootPc, notes: notesRef.current, pitches: pitchesRef.current },
+          { label, rootPc, notes: notesRef.current, pitches: pitchesRef.current, t: onset },
         ].slice(-MAX_ENTRIES)
       })
     }, SETTLE_MS)
