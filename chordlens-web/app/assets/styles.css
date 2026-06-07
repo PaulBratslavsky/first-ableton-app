@@ -181,9 +181,11 @@ body {
 
 /* Continuous progression sheet (its own panel below the piano). */
 .panel--sheet { padding-bottom: 12px; margin-bottom: 16px; }
-.sheet-scroll { margin-top: 6px; }
+/* Reserve the staff height so the panel never collapses mid-update (no layout shift). */
+.sheet-scroll { margin-top: 6px; min-height: 232px; }
 .progression-staff {
   width: 100%;
+  min-height: 224px;
   background: #fbfbfd;
   border-radius: 8px;
   overflow: hidden;
@@ -444,6 +446,7 @@ body {
   display: flex;
   justify-content: center;
   padding: 6px;
+  min-height: 280px; /* reserve the staff height so it never collapses mid-update */
 }
 
 /* ---- Push pad grid ---- */

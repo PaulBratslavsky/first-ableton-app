@@ -5,26 +5,24 @@ import {
   StaveNote,
   StaveConnector,
   Accidental,
-  Voice,
-  Formatter,
+  TickContext,
 } from 'vexflow'
 import { CLEF_SPLIT, NOTE_NAMES, FLAT_NAMES } from '../lib/config'
 import { pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
 import type { ChordHistoryEntry } from '../hooks/useChordHistory'
 
-// One continuous grand staff. Each chord's duration/spacing reflects how long
-// it was actually held (quantized to a note value via the song tempo), so the
-// sheet reads like the music was played — not equidistant whole notes.
-const PAD_LEFT = 56 // clef + brace room
-const PAD_RIGHT = 16
+// One continuous grand staff. Each chord is placed at a horizontal position
+// proportional to WHEN it was played (BPM-based), like a playhead writing notes
+// left→right — so the gap between notes reflects the real time between them,
+// and the note value reflects how long it was held.
+const PAD_RIGHT = 18
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
-const PX_PER_BEAT = 40
-const MIN_PER_CHORD = 28 // rough width budget per chord for the visible-count cap
+const PX_PER_BEAT = 56 // horizontal pixels per quarter-note beat
 
-// Note values real durations quantize onto (no dotted/triplets for now).
+// Note values real durations quantize onto (for the note-head shape).
 const STEPS: { beats: number; code: string }[] = [
   { beats: 0.25, code: '16' },
   { beats: 0.5, code: '8' },
@@ -80,21 +78,20 @@ function buildNote(
 interface Props {
   history: ChordHistoryEntry[]
   useFlats?: boolean
-  /** Song tempo (BPM) used to quantize real durations; falls back to 120. */
+  /** Song tempo (BPM) — sets the time→pixels scale; falls back to 120. */
   tempo?: number | null
 }
 
 /**
- * The progression on a single grand staff — each recorded chord is one
- * whole-note column, oldest → newest, reading like a lead sheet. The clef is
- * always visible; only the most recent chords that fit the panel are shown.
- * Notes split across treble/bass by CLEF_SPLIT and are colored by pitch-class.
+ * The progression on a single grand staff, laid out in real time: each chord
+ * sits at x ∝ (its onset time) so the distance between notes is the actual time
+ * between when you played them, scaled by the tempo. Newest is anchored at the
+ * right (a playhead); older chords scroll off the left.
  */
 export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(900)
 
-  // Track the panel width so we can fit the most recent chords without scroll.
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -112,10 +109,6 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
     el.innerHTML = '' // VexFlow appends; clear before each re-render.
 
     const staveW = Math.max(width - 4, 200)
-    const usable = staveW - PAD_LEFT - PAD_RIGHT
-    const capacity = Math.max(1, Math.floor(usable / MIN_PER_CHORD))
-    const visible = history.slice(-capacity)
-
     const renderer = new Renderer(el, Renderer.Backends.SVG)
     renderer.resize(staveW, HEIGHT)
     const ctx = renderer.getContext()
@@ -124,49 +117,45 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
     treble.addClef('treble').setContext(ctx).draw()
     const bass = new Stave(2, BASS_Y, staveW - 4)
     bass.addClef('bass').setContext(ctx).draw()
+    new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
+    new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
 
-    new StaveConnector(treble, bass)
-      .setType(StaveConnector.type.BRACE)
-      .setContext(ctx)
-      .draw()
-    new StaveConnector(treble, bass)
-      .setType(StaveConnector.type.SINGLE_LEFT)
-      .setContext(ctx)
-      .draw()
+    if (history.length === 0) return
 
-    if (visible.length === 0) return
-
-    // Real durations: how long each chord was held, in beats, quantized.
     const bpm = tempo && tempo > 0 ? tempo : 120
     const beatMs = 60000 / bpm
     const now = Date.now()
-    const durs = visible.map((e, i) => {
+    const noteStartX = treble.getNoteStartX()
+    const rightX = staveW - 4 - PAD_RIGHT
+
+    // Right-anchored playhead: newest chord near the right edge; each chord's x
+    // is set by how long *before* the newest it was played.
+    const tEnd = history[history.length - 1].t ?? now
+    const xAbsOf = (t: number) => rightX - ((tEnd - t) / beatMs) * PX_PER_BEAT
+    const visible = history.filter((e) => xAbsOf(e.t ?? now) >= noteStartX)
+    if (visible.length === 0) return
+
+    visible.forEach((e) => {
+      const idx = history.indexOf(e)
       const start = e.t ?? now
-      const end = i + 1 < visible.length ? (visible[i + 1].t ?? now) : now
-      const ms = Math.max(60, end - start)
-      return quantize(ms / beatMs)
+      const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
+      const code = quantize(Math.max(60, end - start) / beatMs).code
+      const v = compactVoicing(e.pitches ?? [])
+      const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats, code)
+      const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats, code)
+
+      const tc = new TickContext()
+      tc.addTickable(tNote)
+      tc.addTickable(bNote)
+      tNote.setStave(treble)
+      bNote.setStave(bass)
+      tNote.setContext(ctx)
+      bNote.setContext(ctx)
+      tc.preFormat()
+      tc.setX(Math.max(0, xAbsOf(start) - noteStartX))
+      tNote.draw()
+      bNote.draw()
     })
-
-    const voicings = visible.map((e) => compactVoicing(e.pitches ?? []))
-    const trebleNotes = voicings.map((v, i) =>
-      buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats, durs[i].code),
-    )
-    const bassNotes = voicings.map((v, i) =>
-      buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats, durs[i].code),
-    )
-
-    const totalBeats = durs.reduce((sum, d) => sum + d.beats, 0)
-    const tVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
-    tVoice.addTickables(trebleNotes)
-    const bVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
-    bVoice.addTickables(bassNotes)
-
-    // Spacing proportional to total musical length (don't stretch a few chords
-    // across the whole staff).
-    const formatW = Math.min(usable, Math.max(160, totalBeats * PX_PER_BEAT))
-    new Formatter().joinVoices([tVoice, bVoice]).format([tVoice, bVoice], formatW)
-    tVoice.draw(ctx, treble)
-    bVoice.draw(ctx, bass)
   }, [
     history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|'),
     useFlats,

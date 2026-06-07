@@ -111,6 +111,29 @@ export const Visualizer = clientEntry(
       onStatus: (s) => {
         status = s
         handle.update()
+        // On (re)connect, pull the session via a correlated request — its reply
+        // carries tempo/transport/key (a plain send()'s reply has no `type` and
+        // is dropped by the event router).
+        if (s === 'open') {
+          bridge
+            .request('get_session', {})
+            .then((info) => {
+              const ss = info as {
+                tempo?: number | null
+                isPlaying?: boolean
+                rootPc?: number | null
+                scaleName?: string | null
+              } | null
+              if (!ss) return
+              if (ss.tempo != null) tempo = ss.tempo
+              if (ss.isPlaying != null) isPlaying = ss.isPlaying
+              if (ss.rootPc != null && ss.scaleName != null) {
+                abletonKey = keyFromAbleton(ss.rootPc, ss.scaleName)
+              }
+              handle.update()
+            })
+            .catch(() => {})
+        }
       },
       onEvent: (ev: AbletonEvent) => {
         switch (ev.type) {

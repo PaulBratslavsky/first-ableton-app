@@ -4,15 +4,16 @@ import { pitchClass, compactVoicing } from '../music/music.ts'
 import { pitchColor } from '../music/colors.ts'
 import type { ChordHistoryEntry } from './progression-strip.tsx'
 
-const PAD_LEFT = 56
-const PAD_RIGHT = 16
+// One continuous grand staff. Each chord sits at x ∝ when it was played
+// (BPM-based) — a playhead writing notes left→right — so the gap between notes
+// is the real time between them. Rendered to an SVG string and applied via the
+// `innerHTML` prop so remix/ui never wipes it (no flicker / layout shift).
+const PAD_RIGHT = 18
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
-const PX_PER_BEAT = 40
-const MIN_PER_CHORD = 28 // rough width budget per chord for the visible-count cap
+const PX_PER_BEAT = 56
 
-// Note values we quantize real durations onto (no dotted/triplets for now).
 const STEPS: { beats: number; code: string }[] = [
   { beats: 0.25, code: '16' },
   { beats: 0.5, code: '8' },
@@ -49,48 +50,20 @@ interface Props {
   tempo?: number | null
 }
 
-/** Continuous grand staff — note durations/spacing reflect actual play timing. */
 export function ProgressionStaff(handle: Handle<Props>) {
-  let node: HTMLDivElement | null = null
   let width = 900
-  let rafScheduled = false
-  let cachedSvg: Node | null = null
   let cachedKey = ''
+  let cachedSvg = ''
+  let building = false
 
-  function scheduleDraw() {
-    if (rafScheduled || typeof requestAnimationFrame === 'undefined') return
-    rafScheduled = true
-    requestAnimationFrame(() => {
-      rafScheduled = false
-      draw()
-    })
-  }
-
-  async function draw() {
-    if (!node) return
-    const { history, useFlats = false, tempo } = handle.props
-    const key =
-      history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|') +
-      `@${tempo ?? 0}#${width}`
-
-    // Cheap path: content unchanged — just re-attach the cached SVG if remix
-    // wiped it on reconcile. Only rebuild when notes/timing/width changed.
-    if (key === cachedKey && cachedSvg) {
-      if (node.firstChild !== cachedSvg) node.replaceChildren(cachedSvg)
-      return
-    }
-
+  async function rebuild(key: string) {
     const VF = await import('vexflow')
-    const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
+    const { Renderer, Stave, StaveNote, StaveConnector, Accidental, TickContext } = VF
+    const { history, useFlats = false, tempo } = handle.props
 
-    // Render offscreen, swap in atomically (never blank the live node → no flicker).
-    const tmp = document.createElement('div')
+    const div = document.createElement('div')
     const staveW = Math.max(width - 4, 200)
-    const usable = staveW - PAD_LEFT - PAD_RIGHT
-    const capacity = Math.max(1, Math.floor(usable / MIN_PER_CHORD))
-    const visible = history.slice(-capacity)
-
-    const renderer = new Renderer(tmp, Renderer.Backends.SVG)
+    const renderer = new Renderer(div, Renderer.Backends.SVG)
     renderer.resize(staveW, HEIGHT)
     const ctx = renderer.getContext()
 
@@ -101,82 +74,80 @@ export function ProgressionStaff(handle: Handle<Props>) {
     new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
 
-    if (visible.length === 0) {
-      cachedSvg = tmp.firstChild
-      cachedKey = key
-      if (cachedSvg) node.replaceChildren(cachedSvg)
-      return
-    }
-
-    // Real durations: time each chord was held, in beats, quantized to a note value.
-    const bpm = tempo && tempo > 0 ? tempo : 120
-    const beatMs = 60000 / bpm
-    const now = Date.now()
-    const durs = visible.map((e, i) => {
-      const start = e.t ?? now
-      const end = i + 1 < visible.length ? (visible[i + 1].t ?? now) : now
-      const ms = Math.max(60, end - start)
-      return quantize(ms / beatMs)
-    })
-
-    const build = (
-      clefPitches: number[],
-      restKey: string,
-      clef: 'treble' | 'bass',
-      code: string,
-    ) => {
-      if (clefPitches.length === 0) {
+    const buildNote = (pitches: number[], restKey: string, clef: 'treble' | 'bass', code: string) => {
+      if (pitches.length === 0) {
         return new StaveNote({ keys: [restKey], duration: `${code}r`, clef })
       }
-      const parts = clefPitches.map((p) => toVexKey(p, useFlats))
+      const parts = pitches.map((p) => toVexKey(p, useFlats))
       const note = new StaveNote({ keys: parts.map((p) => p.key), duration: code, clef })
       parts.forEach((p, i) => {
         if (p.accidental) note.addModifier(new Accidental(p.accidental), i)
-        const color = pitchColor(clefPitches[i])
+        const color = pitchColor(pitches[i])
         note.setKeyStyle(i, { fillStyle: color, strokeStyle: color })
       })
       return note
     }
 
-    const voicings = visible.map((e) => compactVoicing(e.pitches ?? []))
-    const trebleNotes = voicings.map((v, i) =>
-      build(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', durs[i].code),
-    )
-    const bassNotes = voicings.map((v, i) =>
-      build(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', durs[i].code),
-    )
+    if (history.length > 0) {
+      const bpm = tempo && tempo > 0 ? tempo : 120
+      const beatMs = 60000 / bpm
+      const now = Date.now()
+      const noteStartX = treble.getNoteStartX()
+      const rightX = staveW - 4 - PAD_RIGHT
+      const tEnd = history[history.length - 1].t ?? now
+      const xAbsOf = (t: number) => rightX - ((tEnd - t) / beatMs) * PX_PER_BEAT
+      const visible = history.filter((e) => xAbsOf(e.t ?? now) >= noteStartX)
 
-    const totalBeats = durs.reduce((sum, d) => sum + d.beats, 0)
-    const tVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
-    tVoice.addTickables(trebleNotes)
-    const bVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
-    bVoice.addTickables(bassNotes)
-    const formatW = Math.min(usable, Math.max(160, totalBeats * PX_PER_BEAT))
-    new Formatter().joinVoices([tVoice, bVoice]).format([tVoice, bVoice], formatW)
-    tVoice.draw(ctx, treble)
-    bVoice.draw(ctx, bass)
+      visible.forEach((e) => {
+        const idx = history.indexOf(e)
+        const start = e.t ?? now
+        const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
+        const code = quantize(Math.max(60, end - start) / beatMs).code
+        const v = compactVoicing(e.pitches ?? [])
+        const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', code)
+        const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', code)
+        const tc = new TickContext()
+        tc.addTickable(tNote)
+        tc.addTickable(bNote)
+        tNote.setStave(treble)
+        bNote.setStave(bass)
+        tNote.setContext(ctx)
+        bNote.setContext(ctx)
+        tc.preFormat()
+        tc.setX(Math.max(0, xAbsOf(start) - noteStartX))
+        tNote.draw()
+        bNote.draw()
+      })
+    }
 
-    cachedSvg = tmp.firstChild
+    cachedSvg = div.innerHTML
     cachedKey = key
-    if (cachedSvg) node.replaceChildren(cachedSvg)
+    handle.update()
   }
 
   return () => {
-    // Always reschedule: remix/ui wipes the imperatively-drawn SVG on each
-    // reconcile, so refill after every commit (draw() reuses a cached SVG when
-    // the content key is unchanged, so this stays cheap).
-    scheduleDraw()
+    const { history, tempo } = handle.props
+    const key =
+      history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|') +
+      `@${tempo ?? 0}#${width}`
+    if (key !== cachedKey && typeof document !== 'undefined' && !building) {
+      building = true
+      rebuild(key)
+        .catch(() => {})
+        .finally(() => {
+          building = false
+        })
+    }
     return (
       <div
         className="progression-staff"
+        innerHTML={cachedSvg}
         mix={ref((n, signal) => {
-          node = n as HTMLDivElement
           const ro = new ResizeObserver((entries) => {
             const w = entries[0]?.contentRect.width
-            // Only redraw on an actual width change — guards a ResizeObserver loop.
             if (w && w > 0 && Math.round(w) !== width) {
               width = Math.round(w)
-              draw()
+              handle.update()
             }
           })
           ro.observe(n)

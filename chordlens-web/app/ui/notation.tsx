@@ -1,4 +1,4 @@
-import { ref, type Handle } from 'remix/ui'
+import { type Handle } from 'remix/ui'
 import { CLEF_SPLIT, NOTE_NAMES, FLAT_NAMES } from '../music/config.ts'
 import { detectChord, pitchClass, compactVoicing } from '../music/music.ts'
 import { pitchColor } from '../music/colors.ts'
@@ -23,44 +23,24 @@ interface Props {
   useFlats?: boolean
 }
 
-/** Remix 3 port of NotationView — VexFlow grand staff (client-rendered). */
+/**
+ * VexFlow grand staff for the current chord. Rendered to an SVG string and
+ * applied via the `innerHTML` prop so remix/ui sets it declaratively and never
+ * wipes it on re-render (no flicker / layout shift).
+ */
 export function Notation(handle: Handle<Props>) {
-  let node: HTMLDivElement | null = null
-  let rafScheduled = false
-  let cachedSvg: Node | null = null
   let cachedKey = ''
+  let cachedSvg = ''
+  let building = false
 
-  // Coalesce redraws to one per animation frame. Runs on every render so the
-  // SVG is refilled right after remix/ui reconciles (and wipes) the canvas.
-  function scheduleDraw() {
-    if (rafScheduled || typeof requestAnimationFrame === 'undefined') return
-    rafScheduled = true
-    requestAnimationFrame(() => {
-      rafScheduled = false
-      draw()
-    })
-  }
-
-  async function draw() {
-    if (!node) return
-    const { heldNotes, useFlats = false } = handle.props
-    const pitches = compactVoicing([...heldNotes].sort((a, b) => a - b))
-    const key = `${pitches.join(',')}|${useFlats}`
-
-    // Cheap path: content unchanged — just re-attach the cached SVG if remix
-    // wiped it. Only rebuild (expensive) when the chord actually changed.
-    if (key === cachedKey && cachedSvg) {
-      if (node.firstChild !== cachedSvg) node.replaceChildren(cachedSvg)
-      return
-    }
-
+  async function rebuild(key: string) {
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
+    const { heldNotes, useFlats = false } = handle.props
+    const pitches = compactVoicing([...heldNotes].sort((a, b) => a - b))
 
-    // Render offscreen then swap in atomically — clearing the live node before
-    // the async import left it blank between frames (the flicker).
-    const tmp = document.createElement('div')
-    const renderer = new Renderer(tmp, Renderer.Backends.SVG)
+    const div = document.createElement('div')
+    const renderer = new Renderer(div, Renderer.Backends.SVG)
     renderer.resize(WIDTH, HEIGHT)
     const ctx = renderer.getContext()
 
@@ -90,30 +70,34 @@ export function Notation(handle: Handle<Props>) {
 
     const treble = drawClef(TREBLE_Y, 'treble', pitches.filter((p) => p >= CLEF_SPLIT), 'b/4')
     const bass = drawClef(BASS_Y, 'bass', pitches.filter((p) => p < CLEF_SPLIT), 'd/3')
-
     new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw()
 
-    cachedSvg = tmp.firstChild
+    cachedSvg = div.innerHTML
     cachedKey = key
-    if (cachedSvg) node.replaceChildren(cachedSvg)
+    handle.update()
   }
 
   return () => {
     const { heldNotes, useFlats = false } = handle.props
     const pitches = [...heldNotes].sort((a, b) => a - b)
     const chord = detectChord(pitches, useFlats)
-    // Always reschedule: remix/ui reconciles this div on every re-render and
-    // wipes the imperatively-drawn SVG, so we must refill after each commit.
-    // draw() itself skips the expensive rebuild when the content is unchanged.
-    scheduleDraw()
+    const key = `${pitches.join(',')}|${useFlats}`
+    if (key !== cachedKey && typeof document !== 'undefined' && !building) {
+      building = true
+      rebuild(key)
+        .catch(() => {})
+        .finally(() => {
+          building = false
+        })
+    }
     return (
       <figure className="notation">
         <figcaption className="view-title">
           Notation <span className="chord-symbol">{chord?.chordSymbol ?? '—'}</span>
         </figcaption>
-        <div className="notation-canvas" mix={ref((n) => (node = n as HTMLDivElement))} />
+        <div className="notation-canvas" innerHTML={cachedSvg} />
       </figure>
     )
   }
