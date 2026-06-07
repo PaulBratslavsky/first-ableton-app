@@ -2,7 +2,7 @@
 
 A real-time visualizer that mirrors what you play on an Ableton **Push** controller across **four instrument views at once** — piano keyboard, guitar fretboard, bass fretboard, and standard music notation.
 
-Play a chord on Push and immediately *see* it four ways: where it sits on a piano, how to finger it on guitar and bass, and how it's written on a grand staff. It's a passive, always-on "second screen" companion to Ableton Live — you don't operate it, you glance at it.
+Play a chord on Push and immediately *see* it four ways: where it sits on a piano, how to finger it on guitar and bass, and how it's written on a grand staff — plus a Push-style chromatic pad grid and the played progression written out as a sheet. It's an always-on "second screen" companion to Ableton Live. With the optional **Max for Live device** it goes **two-way**: it also reads Ableton's **key, tempo, and transport**, and can **drive Live** (play/stop, set tempo, fire clips) — all over a local WebSocket, no IAC routing.
 
 ![ChordLens showing an Fmaj7 chord across piano, guitar, bass, and notation, with the progression strip and key readout](docs/chordlens-features.png)
 
@@ -14,7 +14,10 @@ Play a chord on Push and immediately *see* it four ways: where it sits on a pian
 - **A color per note** — each pitch has its own color, shared across *every* view (including the noteheads), so the same note is instantly recognizable on piano, guitar, bass, and the staff.
 - **Live chord detection** — the detected chord symbol shows above the keyboard and on the staff (e.g. `Cmaj7`, `Am`, `G/B`).
 - **Chord progression history** — a strip records the chords you settle on (`C · Am · Fmaj7`), each chip tinted by its root; **Clear** to reset.
-- **Key & scale awareness** — auto-detects the key (with a manual override), shows the chord's **Roman numeral** (e.g. `IIm7 · V7 · I`), spells accidentals to match the key (sharps or flats), and flags **out-of-key** notes with a dashed outline.
+- **Key & scale awareness** — auto-detects the key (with a manual override), shows the chord's **Roman numeral** (e.g. `IIm7 · V7 · I`), spells accidentals to match the key (sharps or flats), and flags **out-of-key** notes with a dashed outline. With the Max for Live bridge it can **pull the key straight from Ableton**.
+- **Fretboard positions** — guitar and bass show the chord as a single playable **position box** (not scattered across the neck) with **◀ ▶ / Auto** to move it, **All** to see the whole neck, and **1×** for one dot per note.
+- **Push view** — an 8×8 chromatic pad grid mirroring Ableton Push, with the scale highlighted.
+- **Progression sheet** — the played progression written out as notation below the piano.
 - **Scale overlay** — the **Scale** toggle faintly traces the whole detected key across the piano and both fretboards, so you can see where your chord sits within the scale (played notes stay bold on top).
 - **Pin / freeze a voicing** — press **Space** (or the **Pin** button) to freeze the current chord so you can study its shapes after letting go.
 - **Demo mode** — cycles sample chords so you can see everything without any MIDI connected.
@@ -23,24 +26,30 @@ Play a chord on Push and immediately *see* it four ways: where it sits on a pian
 
 ## How it works
 
-ChordLens is a **single desktop app** (Tauri). Its Rust backend reads MIDI directly and streams note events to the React UI — no separate process, no WebSocket server, no terminal once it's built:
+ChordLens is a **Tauri desktop app** (Rust backend + React UI). There are two ways to feed it from Ableton — use either, or both:
+
+**1. MIDI in (always available).** The Rust backend opens a MIDI input directly with [`midir`](https://github.com/Boddlnagg/midir) and streams note events to the UI — your controller, or Ableton via a virtual MIDI bus (macOS **IAC**). No helper process.
 
 ```
-                ChordLens.app (Tauri desktop app)
-   MIDI         ┌───────────────────────────────────────────┐
- ───────────▶   │  Rust backend (midir)   ──events──▶  React UI │
- keyboard       │  reads the chosen MIDI    {pitch,    Piano (hero) │
- or Ableton     │  input port               velocity}  Guitar · Bass │
- (via IAC bus)  │                                       Notation     │
-                └───────────────────────────────────────────┘
+  MIDI ──▶ Rust backend (midir) ──{pitch,velocity}──▶ React UI
+  (controller / IAC)                                  piano · guitar · bass · notation · Push · sheet
 ```
 
-- The Rust side enumerates MIDI inputs (keyboards, IAC buses, etc.), opens the one you pick, and emits a `midi-note` event per note on/off.
-- The React side keeps the set of held notes and renders the four synchronized views.
+**2. Max for Live bridge (two-way).** The optional **ChordLens device** runs *inside* Ableton and connects to the app over a local **WebSocket** (`:17999`). It taps the track's MIDI (clip playback included — no IAC) and bridges the **Live API in both directions**:
 
-Note event shape (Rust → UI): `{ pitch, velocity }` — `pitch` is a MIDI note 0–127, `velocity > 0` is a note-on, `velocity 0` is a note-off.
+```
+            ┌──────────────── ChordLens.amxd (in Ableton) ────────────────┐
+ Ableton ⇄  │  Live API  ·  WebSocket server :17999                        │ ⇄  React UI
+            └─────────────────────────────────────────────────────────────┘
+   read  →  notes · song key · tempo · transport
+   write ←  set tempo · fire clips · play / stop · create track
+```
 
-> **Where do notes come from?** A plugged-in MIDI keyboard works with zero setup — pick it and play. To visualize **Ableton** (Push, clips), route Live to a virtual MIDI bus (macOS **IAC**) and pick that bus in the app; see [Visualizing Ableton](#visualizing-ableton-live-via-iac) below. Ableton doesn't expose its notes to anything unless you route them somewhere — that one-time IAC step is unavoidable for any tool.
+So with the device the app not only *sees* what's happening in Ableton (notes, key, tempo, transport) but can *drive* it. The device is **dependency-free** (the WebSocket server uses Node's built-ins — no `npm install`, no `node_modules`); the app's frontend is the WebSocket client. See [`max-for-live/README.md`](max-for-live/README.md).
+
+Note event shape (`{ pitch, velocity }`): `pitch` is a MIDI note 0–127, `velocity > 0` is a note-on, `velocity 0` is a note-off.
+
+> **Which path?** A plugged-in MIDI keyboard needs zero setup — pick it and play. For Ableton you can either route a track to **IAC** (notes only, see [Visualizing Ableton](#visualizing-ableton-live-via-iac)) or drop the **Max for Live device** (notes + key + transport + control, no IAC). The Max bridge is the richer, no-routing option.
 
 ---
 
@@ -89,21 +98,25 @@ Ableton doesn't expose its notes to other apps unless you route them out. On mac
 
 Instead of the IAC routing above, you can drop the **ChordLens Max for Live
 device** on a track. It taps the track's MIDI directly (clip playback included)
-and also bridges Ableton's **Live API**, so ChordLens additionally shows live
-**tempo / transport** and can **control Live** (play/stop, set tempo, fire
-clips). The app talks to the device over a local WebSocket (`:17999`) and the
-**Ableton** chip in the header turns green when connected.
+and bridges Ableton's **Live API**, so ChordLens additionally shows live
+**tempo / transport**, pulls the **song key**, and can **control Live**
+(play/stop, set tempo, fire clips). The app talks to the device over a local
+WebSocket (`:17999`); the **Ableton** chip in the header turns green when
+connected (with a **↻** button to reconnect).
 
-Setup is a one-time paste-and-save in the Max editor — see
-**[`max-for-live/README.md`](max-for-live/README.md)** for the full steps,
-protocol, and how to extend it.
+The device is **dependency-free** — the WebSocket server uses Node's built-ins,
+so there's **no `npm install`, no `node_modules`**. Setup is a one-time
+paste-and-save in the Max editor (then optionally **Freeze** for a portable,
+self-contained device) — see **[`max-for-live/README.md`](max-for-live/README.md)**
+for the full steps, protocol, and how to extend it.
 
 | | IAC bus | Max for Live device |
 |---|---|---|
 | Shows played/clip notes | ✅ | ✅ (no IAC needed) |
 | Live tempo / transport | ❌ | ✅ |
+| Song key sync | ❌ | ✅ |
 | Control Ableton from the app | ❌ | ✅ |
-| Setup | macOS MIDI routing | paste device once |
+| Setup | macOS MIDI routing | paste device once (no npm install) |
 
 ---
 
@@ -120,7 +133,7 @@ Musical settings are constants in [`chordlens-app/src/lib/config.ts`](chordlens-
 | `PIANO_LOW` / `PIANO_HIGH` | `36` / `84` | Keyboard span (C2–C6). |
 | `CLEF_SPLIT` | `60` | Notes ≥ this go to the treble clef, below to bass. |
 
-Accidentals are always **sharps** in v1 (no key-aware spelling yet).
+Accidentals are spelled **sharps or flats to match the detected/selected key**. (Per-*note* enharmonic correctness within a key is still simplified — see Scope.)
 
 ---
 
@@ -137,28 +150,30 @@ chordlens-app/                  # Tauri desktop app (React UI + Rust backend)
       useChordHistory.ts        # records settled chords for the progression strip
     components/
       PianoView.tsx             # SVG keyboard (hero view)
-      FretboardView.tsx         # reused for guitar AND bass
-      NotationView.tsx          # VexFlow grand staff + chord symbol
-      ProgressionStrip.tsx      # chord history chips
-      KeyBadge.tsx              # detected key + manual override
+      PushView.tsx              # 8x8 Push-style chromatic pad grid
+      FretboardView.tsx         # guitar AND bass: position box + ◀▶/Auto/All/1×
+      NotationView.tsx          # VexFlow grand staff + chord symbol (current chord)
+      ProgressionStrip.tsx      # chord history chips (chords / notes toggle)
+      ProgressionStaff.tsx      # the progression written out on a grand staff
+      KeyBadge.tsx              # detected/Ableton key + manual override
       StatusIndicator.tsx       # listening / demo state
-      AbletonStatus.tsx         # Max for Live connection + tempo + transport toggle
+      AbletonStatus.tsx         # Max for Live connection + tempo + transport + reconnect
       InputPicker.tsx           # MIDI input chooser
     lib/
-      music.ts                  # tonal wrappers: detectChord, noteName, pitchClass, fretPositionsFor
-      theory.ts                 # key estimation, scale, Roman numerals, sharp/flat spelling
+      music.ts                  # tonal wrappers: detectChord, fret positions, shape windows
+      theory.ts                 # key estimation/sync, scale, Roman numerals, spelling
       ableton.ts                # AbletonBridge: auto-reconnecting WebSocket client + typed commands
       colors.ts                 # one color per pitch-class (shared by all views)
-      config.ts                 # constants (tunings, ranges, octave convention)
+      config.ts                 # constants (tunings, ranges, Push grid, octave convention)
       *.test.ts                 # unit tests for music + theory
   src-tauri/                    # Rust backend
     src/lib.rs                  # midir MIDI reader; emits "midi-note" events; commands
     examples/list_midi.rs       # standalone MIDI-port enumeration check
     Cargo.toml, tauri.conf.json # Rust deps + app/window/bundle config
-max-for-live/                   # optional Ableton bridge device (see its README)
+max-for-live/                   # optional Ableton bridge device — dependency-free (see its README)
   ChordLens.maxpat              # patch source (paste → ChordLens.amxd)
-  chordlens.v8.js               # LiveAPI: observe transport + run commands
-  chordlens.server.js           # WebSocket server (node.script) on :17999
+  chordlens.v8.js               # LiveAPI: observe transport/tempo/key + run commands
+  chordlens.server.js           # dependency-free WebSocket server (node.script) on :17999
 docs/architecture.md            # full system architecture + diagrams
 ```
 
@@ -192,7 +207,7 @@ The chord-detection, note-naming, and fretboard-position logic in `lib/music.ts`
 Started as a passive real-time mirror; the Features above (color, progression history, key awareness, pin) have since been added. Still **parked**:
 
 - Playback visualization of recorded clips synced to Live's transport (where [OSMD](https://opensheetmusicdisplay.org/) would replace VexFlow).
-- Cycling / selecting a single guitar or bass fingering (currently lights **all** matching positions).
+- True chord-shape *fingerings* (CAGED voicings). Fretboards now show a **position box** (◀▶ / Auto / All / 1×) rather than scattering every match, but not a single curated one-note-per-string shape.
 - Per-note "correct" enharmonic spelling within a key (currently spells sharps or flats per the key signature, not per individual note).
 - Alternate tunings (drop D, 5-string bass, custom).
 - Saving / exporting progressions or notation (where TanStack server functions would come in).

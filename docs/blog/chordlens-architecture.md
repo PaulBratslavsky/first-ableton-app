@@ -127,21 +127,36 @@ flowchart LR
   V8 <-->|observe + control| LIVEAPI[(Live API)]
 ```
 
-The MIDI tap is `midiin → midiparse → prepend note → node.script`. The `node.script` side hosts the WebSocket using the `max-api` module that Max injects at runtime (note: the `max-api` package on npm is just a placeholder — Max provides the real one):
+The MIDI tap is `midiin → midiparse → prepend note → node.script`. The `node.script` side hosts the WebSocket — and crucially it's **dependency-free**, implemented with Node's built-in `http` + `crypto` (no `ws`, no `npm install`, no `node_modules`). It uses the `max-api` module Max injects at runtime (the `max-api` package on npm is just a placeholder — Max provides the real one):
 
 ```js
-// chordlens.server.js (node.script)
+// chordlens.server.js (node.script) — dependency-free WebSocket
 const Max = require('max-api')
-const { WebSocketServer } = require('ws')
-const wss = new WebSocketServer({ host: '127.0.0.1', port: 17999 })
+const http = require('http')
+const crypto = require('crypto')
+
+const server = http.createServer()
+server.on('upgrade', (req, socket) => {
+  const accept = crypto
+    .createHash('sha1')
+    .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64')
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  )
+  // …then encode/decode WebSocket frames and broadcast to clients
+})
+server.listen(17999, '127.0.0.1')
 
 // MIDI note from the patch -> broadcast to the app
 Max.addHandler('note', (pitch, velocity) => {
   broadcast({ type: 'note', pitch: Number(pitch), velocity: Number(velocity) })
 })
-// A command from the app -> forward to the v8 LiveAPI bridge
-Max.outlet('cmd', JSON.stringify({ type: 'set_tempo', tempo: 128 }))
 ```
+
+> **Why dependency-free matters:** the original version used the `ws` npm package, and that one `node_modules` dependency was the source of every "can't find file / module not found" failure when Ableton copied the device away from its modules. Built-ins removed the whole class of problem.
 
 The `v8` side observes transport and runs commands. One gotcha: **you cannot use `LiveAPI` in global code** — you must wait for `live.thisdevice` to fire — and in the `v8` object the constructor needs the two-argument form, or the path silently fails to resolve:
 
@@ -184,41 +199,37 @@ A native window opens with the four views. Pick a **MIDI input** from the dropdo
 
 This is the step that adds clip-playback capture, live tempo/transport, and control over Live. You build the device once in the Max editor (devices are binary `.amxd` files, so they can't ship as plain text). Live Suite includes Max for Live; Standard needs the add-on.
 
-**1. Install the WebSocket dependency** (the device's `node.script` needs `ws`):
+The device is **dependency-free** — no `npm install`, no `node_modules`.
 
-```bash
-cd max-for-live
-npm install
-```
-
-**2. Copy the patch to your clipboard:**
+**1. Copy the patch to your clipboard:**
 
 ```bash
 cat max-for-live/ChordLens.maxpat | pbcopy   # macOS
 ```
 
-**3. Create the device and paste the patch:**
+**2. Create the device and paste the patch:**
 
 1. In Ableton, drag a **Max MIDI Effect** onto a MIDI track (Browser → **Max for Live → Max MIDI Effect**).
 2. Click the device's **edit (✏️) button** — the Max editor opens showing the default `midiin → midiout`.
 3. In the editor: **⌘A** (Select All) → **Delete** → **⌘V** (Paste). The ChordLens objects appear (`midiin`, `midiout`, `midiparse`, `prepend note`, `node.script`, `v8`, `live.thisdevice`).
-4. **⌘S** → save as **`ChordLens.amxd`** in the `max-for-live/` folder, so it sits next to the `.js` files and `node_modules/`.
-5. Close the editor.
+4. **⌘S** → save as **`ChordLens.amxd`** in the `max-for-live/` folder, next to the two `.js` files.
+5. Close the editor. (Optional but recommended: **Freeze** the device — the ❄️ button in the Max editor — to bundle the scripts *into* the `.amxd` so it works from anywhere.)
 
 > The whole patch is self-contained — it includes its own `midiin → midiout` passthrough, so replacing the template wholesale gives you exactly one of each object and keeps MIDI flowing to your instrument.
 
-**4. Verify it's live:**
+**3. Verify it's live:**
 
 - The Max Console should print `ChordLens WebSocket listening on ws://127.0.0.1:17999`.
 - Or check the OS: `lsof -nP -iTCP:17999 -sTCP:LISTEN`.
 - In ChordLens, the **Ableton** chip turns green and shows live BPM. Hit **Play** in Ableton and clip notes light up the views.
 
-## Two gotchas worth knowing
+## Three gotchas worth knowing
 
-If you adapt this for your own device, these two cost real debugging time:
+If you adapt this for your own device, these cost real debugging time:
 
 1. **Capture from `midiin`, not `notein`.** `notein` only hears physical MIDI *ports*, so it works when you play a controller but shows **nothing during clip playback**. `midiin` carries Live's actual track MIDI stream (clips + input). The fix is the `midiin → midiparse` tap.
 2. **`LiveAPI` needs the two-arg constructor** `new LiveAPI(callback, path)`, and it can't run in global code — wait for `live.thisdevice`. A lone string argument is interpreted as the callback, leaving the path unset and every `.get()` failing with `get: no valid object set`.
+3. **Avoid npm dependencies in `node.script` if you can.** Ableton copies a device into its User Library when you use it, separating it from any `node_modules` — which manifests as "Cannot find module" / "can't find file." Implementing the WebSocket with Node built-ins (`http` + `crypto`) sidestepped the whole problem; if you must use a dependency, **Freeze** the device to bundle it in.
 
 ## Wrapping up
 

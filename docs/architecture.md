@@ -246,14 +246,16 @@ const heldNotes = useMemo(() => {
 `{ pitch: number, velocity: number }` — `velocity: 0` means note-off.
 
 ### Max for Live WebSocket (device ⇄ frontend, `ws://127.0.0.1:17999`)
-JSON, one object per message. Authoritative reference in
-[`max-for-live/README.md`](../max-for-live/README.md).
+JSON, one object per message. The server is **dependency-free** — implemented
+with Node's built-in `http` + `crypto` (no `ws`, no `node_modules`). Authoritative
+reference in [`max-for-live/README.md`](../max-for-live/README.md).
 
-- **Device → app events:** `hello`, `note`, `transport`, `tempo`, `session`,
-  `error`.
+- **Device → app events:** `hello`, `note`, `transport`, `tempo`, `key`,
+  `session`, `pong`, `error`. (`key` = `{rootPc, scaleName}`; `session` includes
+  `rootPc`/`scaleName`.)
 - **App → device commands:** `get_session`, `set_tempo`, `start_playback`,
   `stop_playback`, `create_midi_track`, `set_track_name`, `fire_clip`,
-  `stop_clip`, `get_track_info`. An optional numeric `id` yields a
+  `stop_clip`, `get_track_info`, `ping`. An optional numeric `id` yields a
   `{id, ok, result}` / `{id, error}` reply.
 
 ### AbletonMCP socket (clients ⇄ remote script, `tcp://localhost:9877`)
@@ -284,9 +286,9 @@ first-ableton-app/
 │        └─ {Piano,Fretboard,Notation}View.tsx, …
 ├─ max-for-live/                  # the Ableton-side device (Path A)
 │  ├─ ChordLens.maxpat            # patch wiring (assemble → ChordLens.amxd)
-│  ├─ chordlens.v8.js             # LiveAPI: observe + control (v8 object)
-│  ├─ chordlens.server.js         # WebSocket server + bridge (node.script)
-│  ├─ package.json                # ws dependency
+│  ├─ chordlens.v8.js             # LiveAPI: observe transport/tempo/key + control (v8)
+│  ├─ chordlens.server.js         # dependency-free WebSocket server + bridge (node.script)
+│  ├─ package.json                # metadata only (no dependencies)
 │  └─ README.md                   # device build steps + protocol
 ├─ docs/                          # this documentation
 └─ resources/                     # product / requirements / spec notes
@@ -319,7 +321,8 @@ first-ableton-app/
 To run the full system:
 
 1. **Build the device once:** assemble `max-for-live/ChordLens.amxd` (see its
-   README) and `npm install` in `max-for-live/`.
+   README) — it's dependency-free, so there's **no `npm install`**. Optionally
+   **Freeze** it for a portable, self-contained device.
 2. **In Ableton:** drop `ChordLens.amxd` on a MIDI track; the Max console should
    print `ChordLens WebSocket listening on ws://127.0.0.1:17999`.
 3. **Run the app:** `cd chordlens-app && npm run desktop` (native MIDI) or
