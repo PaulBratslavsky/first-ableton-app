@@ -21,7 +21,9 @@ const DEMO_CHORDS: number[][] = [
   [60, 64, 67, 71], // Cmaj7
   [62, 65, 69], //  Dm
 ]
-const DEMO_STEP_MS = 1800
+// Hold time per chord (ms) — an actual rhythm, not a metronome, so the sheet's
+// time-proportional spacing is visible without playing into Ableton.
+const DEMO_RHYTHM_MS = [1000, 350, 350, 800, 1400, 700]
 
 /**
  * Running inside the Tauri desktop shell? In a plain browser (e.g. `npm run dev`
@@ -61,18 +63,20 @@ export function usePushMidi(): PushMidi {
     })
   }, [])
 
-  // --- Demo mode: cycle sample chords on a timer. ---
+  // --- Demo mode: cycle sample chords with an actual rhythm. ---
   useEffect(() => {
     if (!demo) return
     setStatus('demo')
     let i = 0
-    const play = () => setHeldNotes(new Set(DEMO_CHORDS[i % DEMO_CHORDS.length]))
-    play()
-    const id = setInterval(() => {
+    let id: ReturnType<typeof setTimeout>
+    const step = () => {
+      setHeldNotes(new Set(DEMO_CHORDS[i % DEMO_CHORDS.length]))
+      const hold = DEMO_RHYTHM_MS[i % DEMO_RHYTHM_MS.length]
       i += 1
-      play()
-    }, DEMO_STEP_MS)
-    return () => clearInterval(id)
+      id = setTimeout(step, hold)
+    }
+    step()
+    return () => clearTimeout(id)
   }, [demo])
 
   const refreshInputs = useCallback(() => {

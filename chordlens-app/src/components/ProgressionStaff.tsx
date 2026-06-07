@@ -13,15 +13,39 @@ import { pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
 import type { ChordHistoryEntry } from '../hooks/useChordHistory'
 
-// One continuous grand staff: one whole-note chord per column, left to right.
-// The clef stays fixed at the left; the most recent chords that fit are shown,
-// so new chords slide in from the right.
-const PER_CHORD = 64 // horizontal space per chord column
+// One continuous grand staff. Each chord's duration/spacing reflects how long
+// it was actually held (quantized to a note value via the song tempo), so the
+// sheet reads like the music was played — not equidistant whole notes.
 const PAD_LEFT = 56 // clef + brace room
 const PAD_RIGHT = 16
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
+const PX_PER_BEAT = 40
+const MIN_PER_CHORD = 28 // rough width budget per chord for the visible-count cap
+
+// Note values real durations quantize onto (no dotted/triplets for now).
+const STEPS: { beats: number; code: string }[] = [
+  { beats: 0.25, code: '16' },
+  { beats: 0.5, code: '8' },
+  { beats: 1, code: 'q' },
+  { beats: 2, code: 'h' },
+  { beats: 4, code: 'w' },
+]
+
+function quantize(beats: number) {
+  const b = Math.min(4, Math.max(0.25, beats))
+  let best = STEPS[0]
+  let bestDiff = Infinity
+  for (const s of STEPS) {
+    const diff = Math.abs(Math.log(s.beats) - Math.log(b))
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = s
+    }
+  }
+  return best
+}
 
 /** MIDI pitch -> { key: "c#/4", accidental } using scientific octaves. */
 function toVexKey(pitch: number, useFlats: boolean) {
@@ -32,18 +56,19 @@ function toVexKey(pitch: number, useFlats: boolean) {
   return { key: `${letter}${accidental ?? ''}/${octave}`, accidental }
 }
 
-/** One whole-note chord (or a whole rest) for a clef. */
+/** One chord (or a rest) of the given note value for a clef. */
 function buildNote(
   pitches: number[],
   restKey: string,
   clef: 'treble' | 'bass',
   useFlats: boolean,
+  code: string,
 ): StaveNote {
   if (pitches.length === 0) {
-    return new StaveNote({ keys: [restKey], duration: 'wr', clef })
+    return new StaveNote({ keys: [restKey], duration: `${code}r`, clef })
   }
   const parts = pitches.map((p) => toVexKey(p, useFlats))
-  const note = new StaveNote({ keys: parts.map((p) => p.key), duration: 'w', clef })
+  const note = new StaveNote({ keys: parts.map((p) => p.key), duration: code, clef })
   parts.forEach((p, i) => {
     if (p.accidental) note.addModifier(new Accidental(p.accidental), i)
     const color = pitchColor(pitches[i])
@@ -55,6 +80,8 @@ function buildNote(
 interface Props {
   history: ChordHistoryEntry[]
   useFlats?: boolean
+  /** Song tempo (BPM) used to quantize real durations; falls back to 120. */
+  tempo?: number | null
 }
 
 /**
@@ -63,7 +90,7 @@ interface Props {
  * always visible; only the most recent chords that fit the panel are shown.
  * Notes split across treble/bass by CLEF_SPLIT and are colored by pitch-class.
  */
-export function ProgressionStaff({ history, useFlats = false }: Props) {
+export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(900)
 
@@ -86,7 +113,7 @@ export function ProgressionStaff({ history, useFlats = false }: Props) {
 
     const staveW = Math.max(width - 4, 200)
     const usable = staveW - PAD_LEFT - PAD_RIGHT
-    const capacity = Math.max(1, Math.floor(usable / PER_CHORD))
+    const capacity = Math.max(1, Math.floor(usable / MIN_PER_CHORD))
     const visible = history.slice(-capacity)
 
     const renderer = new Renderer(el, Renderer.Backends.SVG)
@@ -109,27 +136,43 @@ export function ProgressionStaff({ history, useFlats = false }: Props) {
 
     if (visible.length === 0) return
 
-    const n = visible.length
+    // Real durations: how long each chord was held, in beats, quantized.
+    const bpm = tempo && tempo > 0 ? tempo : 120
+    const beatMs = 60000 / bpm
+    const now = Date.now()
+    const durs = visible.map((e, i) => {
+      const start = e.t ?? now
+      const end = i + 1 < visible.length ? (visible[i + 1].t ?? now) : now
+      const ms = Math.max(60, end - start)
+      return quantize(ms / beatMs)
+    })
+
     const voicings = visible.map((e) => compactVoicing(e.pitches ?? []))
-    const trebleNotes = voicings.map((v) =>
-      buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats),
+    const trebleNotes = voicings.map((v, i) =>
+      buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats, durs[i].code),
     )
-    const bassNotes = voicings.map((v) =>
-      buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats),
+    const bassNotes = voicings.map((v, i) =>
+      buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats, durs[i].code),
     )
 
-    const tVoice = new Voice({ numBeats: n * 4, beatValue: 4 }).setMode(Voice.Mode.SOFT)
+    const totalBeats = durs.reduce((sum, d) => sum + d.beats, 0)
+    const tVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
     tVoice.addTickables(trebleNotes)
-    const bVoice = new Voice({ numBeats: n * 4, beatValue: 4 }).setMode(Voice.Mode.SOFT)
+    const bVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
     bVoice.addTickables(bassNotes)
 
-    // Pack chords from the left at a fixed spacing (don't stretch across the
-    // whole staff when there are only a few).
-    const formatW = Math.min(usable, n * PER_CHORD)
+    // Spacing proportional to total musical length (don't stretch a few chords
+    // across the whole staff).
+    const formatW = Math.min(usable, Math.max(160, totalBeats * PX_PER_BEAT))
     new Formatter().joinVoices([tVoice, bVoice]).format([tVoice, bVoice], formatW)
     tVoice.draw(ctx, treble)
     bVoice.draw(ctx, bass)
-  }, [history.map((e) => (e.pitches ?? []).join(',')).join('|'), useFlats, width])
+  }, [
+    history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|'),
+    useFlats,
+    width,
+    tempo,
+  ])
 
   return <div className="progression-staff" ref={ref} />
 }

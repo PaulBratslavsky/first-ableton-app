@@ -195,7 +195,7 @@ function Visualizer() {
               Play a progression — it'll be written out here, chord by chord.
             </p>
           ) : (
-            <ProgressionStaff history={history} useFlats={useFlats} />
+            <ProgressionStaff history={history} useFlats={useFlats} tempo={live.tempo} />
           )}
         </div>
       </section>
