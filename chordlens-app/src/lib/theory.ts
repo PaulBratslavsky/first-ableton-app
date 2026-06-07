@@ -69,6 +69,11 @@ export function keyName(key: MusicalKey): string {
   return `${tonicName(key)} ${key.mode}`
 }
 
+/** Pitch-class (0..11) of the key's tonic, for highlighting the root. */
+export function tonicPc(key: MusicalKey): number {
+  return Note.chroma(tonicName(key)) ?? 0
+}
+
 /** Does this key's signature use flats? (C major / A minor default to sharps.) */
 export function usesFlats(key: MusicalKey): boolean {
   const name = tonicName(key)
