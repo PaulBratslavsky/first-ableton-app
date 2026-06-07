@@ -5,6 +5,8 @@ interface Props {
   value: MusicalKey | null
   isAuto: boolean
   onPick: (key: MusicalKey | null) => void
+  /** Label for the non-manual option — "Auto" or "Ableton". */
+  autoLabel?: string
 }
 
 const MODES: Mode[] = ['major', 'minor']
@@ -19,7 +21,7 @@ const KEY_OPTIONS: { id: string; label: string; key: MusicalKey }[] = MODES.flat
 )
 
 /** Detected-key readout with an Auto / manual-override dropdown. */
-export function KeyBadge({ value, isAuto, onPick }: Props) {
+export function KeyBadge({ value, isAuto, onPick, autoLabel = 'Auto' }: Props) {
   const selected = isAuto ? 'auto' : value ? `${value.tonic}:${value.mode}` : 'auto'
 
   return (
@@ -38,7 +40,8 @@ export function KeyBadge({ value, isAuto, onPick }: Props) {
         }}
       >
         <option value="auto">
-          Auto{isAuto && value ? ` — ${keyName(value)}` : ''}
+          {autoLabel}
+          {isAuto && value ? ` — ${keyName(value)}` : ''}
         </option>
         {KEY_OPTIONS.map((o) => (
           <option key={o.id} value={o.id}>

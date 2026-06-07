@@ -9,19 +9,19 @@ import {
   Formatter,
 } from 'vexflow'
 import { CLEF_SPLIT, NOTE_NAMES, FLAT_NAMES } from '../lib/config'
-import { pitchClass } from '../lib/music'
+import { pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
 import type { ChordHistoryEntry } from '../hooks/useChordHistory'
 
 // One continuous grand staff: one whole-note chord per column, left to right.
 // The clef stays fixed at the left; the most recent chords that fit are shown,
 // so new chords slide in from the right.
-const PER_CHORD = 62 // horizontal space per chord column
+const PER_CHORD = 64 // horizontal space per chord column
 const PAD_LEFT = 56 // clef + brace room
 const PAD_RIGHT = 16
-const HEIGHT = 156
-const TREBLE_Y = 12
-const BASS_Y = 82
+const HEIGHT = 224
+const TREBLE_Y = 26
+const BASS_Y = 110
 
 /** MIDI pitch -> { key: "c#/4", accidental } using scientific octaves. */
 function toVexKey(pitch: number, useFlats: boolean) {
@@ -110,11 +110,12 @@ export function ProgressionStaff({ history, useFlats = false }: Props) {
     if (visible.length === 0) return
 
     const n = visible.length
-    const trebleNotes = visible.map((e) =>
-      buildNote((e.pitches ?? []).filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats),
+    const voicings = visible.map((e) => compactVoicing(e.pitches ?? []))
+    const trebleNotes = voicings.map((v) =>
+      buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', useFlats),
     )
-    const bassNotes = visible.map((e) =>
-      buildNote((e.pitches ?? []).filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats),
+    const bassNotes = voicings.map((v) =>
+      buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', useFlats),
     )
 
     const tVoice = new Voice({ numBeats: n * 4, beatValue: 4 }).setMode(Voice.Mode.SOFT)

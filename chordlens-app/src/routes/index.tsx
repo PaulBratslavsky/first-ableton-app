@@ -15,7 +15,13 @@ import { PushView } from '../components/PushView'
 import { FretboardView } from '../components/FretboardView'
 import { NotationView } from '../components/NotationView'
 import { detectChord } from '../lib/music'
-import { romanNumeral, scalePcs, tonicPc, usesFlats } from '../lib/theory'
+import {
+  romanNumeral,
+  scalePcs,
+  tonicPc,
+  usesFlats,
+  keyFromAbleton,
+} from '../lib/theory'
 import { GUITAR_TUNING, BASS_TUNING, FRET_COUNT } from '../lib/config'
 
 export const Route = createFileRoute('/')({ component: Visualizer })
@@ -80,7 +86,20 @@ function Visualizer() {
   }, [togglePin])
 
   // --- Key / scale awareness -------------------------------------------------
-  const { key, isAuto, setManualKey } = useKeyEstimate(pitches, frozen)
+  // Ableton's song key (when the bridge is connected) overrides auto-detection
+  // but yields to a manual pick.
+  const abletonKey = useMemo(
+    () =>
+      live.liveKey
+        ? keyFromAbleton(live.liveKey.rootPc, live.liveKey.scaleName)
+        : null,
+    [live.liveKey],
+  )
+  const { key, isAuto, source, setManualKey } = useKeyEstimate(
+    pitches,
+    frozen,
+    abletonKey,
+  )
   const useFlats = key ? usesFlats(key) : false
   const keyPcs = useMemo(() => (key ? scalePcs(key) : null), [key])
   const rootPc = key ? tonicPc(key) : null
@@ -123,7 +142,12 @@ function Visualizer() {
               onRefresh={refreshInputs}
             />
           )}
-          <KeyBadge value={key} isAuto={isAuto} onPick={setManualKey} />
+          <KeyBadge
+            value={key}
+            isAuto={isAuto}
+            onPick={setManualKey}
+            autoLabel={source === 'ableton' ? 'Ableton' : 'Auto'}
+          />
           <button
             type="button"
             className={`pin-btn${showScale ? ' pin-btn--active' : ''}`}
@@ -151,15 +175,30 @@ function Visualizer() {
           </button>
           <StatusIndicator status={status} onToggleDemo={toggleDemo} />
           <AbletonStatus
-            connected={live.connected}
+            status={live.status}
             tempo={live.tempo}
             isPlaying={live.isPlaying}
             onTogglePlay={live.isPlaying ? live.stopPlayback : live.startPlayback}
+            onReconnect={live.reconnect}
           />
         </div>
       </header>
 
       <ProgressionStrip history={history} onClear={clear} />
+
+      {/* Continuous notation sheet of the whole progression, above the piano. */}
+      <section className="panel panel--sheet">
+        <div className="view-title">Progression · sheet</div>
+        <div className="sheet-scroll">
+          {history.length === 0 ? (
+            <p className="idle-hint" style={{ visibility: 'visible' }}>
+              Play a progression — it'll be written out here, chord by chord.
+            </p>
+          ) : (
+            <ProgressionStaff history={history} useFlats={useFlats} />
+          )}
+        </div>
+      </section>
 
       {/* Piano — the hero view. */}
       <section className="panel panel--hero">
@@ -177,20 +216,6 @@ function Visualizer() {
             ? 'Choose a MIDI input above, or play into the ChordLens device in Ableton, to begin.'
             : 'Play something — the views will light up here.'}
         </p>
-      </section>
-
-      {/* Continuous notation sheet of the whole progression, lead-sheet style. */}
-      <section className="panel panel--sheet">
-        <div className="view-title">Progression · sheet</div>
-        <div className="sheet-scroll">
-          {history.length === 0 ? (
-            <p className="idle-hint" style={{ visibility: 'visible' }}>
-              Play a progression — it'll be written out here, chord by chord.
-            </p>
-          ) : (
-            <ProgressionStaff history={history} useFlats={useFlats} />
-          )}
-        </div>
       </section>
 
       <section className="grid">
@@ -216,19 +241,17 @@ function Visualizer() {
             useFlats={useFlats}
           />
         </div>
-        <div className="panel panel--notation">
-          <NotationView heldNotes={displayNotes} useFlats={useFlats} />
-        </div>
-        {showPush && (
-          <div className="panel">
-            <div className="view-title">Push · chromatic</div>
-            <PushView
-              heldNotes={displayNotes}
-              scalePcs={keyPcs}
-              rootPc={rootPc}
-            />
-          </div>
-        )}
+      </section>
+
+      {showPush && (
+        <section className="panel panel--sheet">
+          <div className="view-title">Push · chromatic</div>
+          <PushView heldNotes={displayNotes} scalePcs={keyPcs} rootPc={rootPc} />
+        </section>
+      )}
+
+      <section className="panel panel--notation">
+        <NotationView heldNotes={displayNotes} useFlats={useFlats} />
       </section>
     </main>
   )

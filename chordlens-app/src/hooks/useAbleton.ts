@@ -29,6 +29,8 @@ export interface UseAbleton {
   tempo: number | null
   /** Whether Ableton's transport is playing. */
   isPlaying: boolean
+  /** Ableton's song key (root pitch-class + scale name), or null. */
+  liveKey: { rootPc: number; scaleName: string } | null
   /** Notes currently held on the device's MIDI input. */
   heldNotes: Set<number>
   /** Sorted held pitches, low to high (matches usePushMidi). */
@@ -42,6 +44,8 @@ export interface UseAbleton {
   stopTrackClips: (track: number) => void
   createMidiTrack: (index?: number) => void
   refreshSession: () => void
+  /** Force a fresh connection attempt now. */
+  reconnect: () => void
 }
 
 export function useAbleton(url?: string): UseAbleton {
@@ -51,6 +55,7 @@ export function useAbleton(url?: string): UseAbleton {
   const [tempo, setTempo] = useState<number | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [heldNotes, setHeldNotes] = useState<Set<number>>(new Set())
+  const [liveKey, setLiveKey] = useState<{ rootPc: number; scaleName: string } | null>(null)
 
   useEffect(() => {
     const handleEvent = (ev: AbletonEvent) => {
@@ -65,14 +70,23 @@ export function useAbleton(url?: string): UseAbleton {
           break
         case 'transport':
           setIsPlaying(ev.isPlaying)
+          // Stopping clears any notes left stuck on (Ableton doesn't always
+          // send note-offs when the transport stops).
+          if (!ev.isPlaying) setHeldNotes(new Set())
           break
         case 'tempo':
           setTempo(ev.tempo)
+          break
+        case 'key':
+          setLiveKey({ rootPc: ev.rootPc, scaleName: ev.scaleName })
           break
         case 'session':
           setSession(ev.session)
           setTempo(ev.session.tempo)
           setIsPlaying(ev.session.isPlaying)
+          if (ev.session.rootPc != null && ev.session.scaleName != null) {
+            setLiveKey({ rootPc: ev.session.rootPc, scaleName: ev.session.scaleName })
+          }
           break
       }
     }
@@ -112,6 +126,13 @@ export function useAbleton(url?: string): UseAbleton {
   const refreshSession = useCallback(() => {
     bridgeRef.current?.send('get_session', {})
   }, [])
+  const reconnect = useCallback(() => {
+    // Refresh: drop stale local state (stuck keys, old transport), then
+    // reconnect — the fresh session reply re-pulls tempo/transport/key.
+    setHeldNotes(new Set())
+    setIsPlaying(false)
+    bridgeRef.current?.reconnect()
+  }, [])
 
   const pitches = [...heldNotes].sort((a, b) => a - b)
 
@@ -121,6 +142,7 @@ export function useAbleton(url?: string): UseAbleton {
     session,
     tempo,
     isPlaying,
+    liveKey,
     heldNotes,
     pitches,
     setTempo: setTempoCmd,
@@ -130,5 +152,6 @@ export function useAbleton(url?: string): UseAbleton {
     stopTrackClips,
     createMidiTrack,
     refreshSession,
+    reconnect,
   }
 }

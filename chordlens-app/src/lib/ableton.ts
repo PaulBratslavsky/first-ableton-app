@@ -26,6 +26,9 @@ export interface SessionInfo {
   signatureDenominator: number | null
   trackCount: number
   returnTrackCount: number
+  /** Song key root pitch-class (0–11) and Ableton scale name. */
+  rootPc?: number | null
+  scaleName?: string
 }
 
 /** Events pushed from the device. */
@@ -34,6 +37,7 @@ export type AbletonEvent =
   | { type: 'note'; pitch: number; velocity: number }
   | { type: 'transport'; isPlaying: boolean }
   | { type: 'tempo'; tempo: number }
+  | { type: 'key'; rootPc: number; scaleName: string }
   | { type: 'session'; session: SessionInfo }
   | { type: 'error'; message: string }
 
@@ -112,6 +116,31 @@ export class AbletonBridge {
 
   connect(): void {
     this.closedByUser = false
+    this.open()
+  }
+
+  /** Force a fresh connection attempt right now (e.g. from a UI button). */
+  reconnect(): void {
+    this.closedByUser = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.stopHeartbeat()
+    const old = this.ws
+    this.ws = null
+    if (old) {
+      // Detach handlers so the old socket's close doesn't double-schedule.
+      old.onopen = null
+      old.onmessage = null
+      old.onclose = null
+      old.onerror = null
+      try {
+        old.close()
+      } catch {
+        // already closing
+      }
+    }
     this.open()
   }
 

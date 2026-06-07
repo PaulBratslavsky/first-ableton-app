@@ -1,4 +1,11 @@
-import { fretPositionsFor, noteName, pitchClass } from '../lib/music'
+import { useMemo, useState } from 'react'
+import {
+  shapeWindowPositions,
+  autoAnchor,
+  onePerPitchClass,
+  noteName,
+  pitchClass,
+} from '../lib/music'
 import { pitchColor, textOn } from '../lib/colors'
 import { NOTE_NAMES } from '../lib/config'
 
@@ -9,6 +16,9 @@ const FRET_W = 40
 const STRING_GAP = 26
 const PAD_Y = 22
 const DOT_R = 9
+
+// Frets shown per position box (a hand span). base..base+SPAN inclusive.
+const SPAN = 4
 
 const INLAY_FRETS = new Set([3, 5, 7, 9, 15])
 const DOUBLE_INLAY = 12
@@ -45,19 +55,102 @@ export function FretboardView({
   const fretCenterX = (f: number) =>
     f === 0 ? LABEL_W + OPEN_W / 2 : nutX + (f - 0.5) * FRET_W
 
-  const lit = fretPositionsFor(heldNotes, tuning, fretCount)
+  // --- Position window: show the chord as one playable box, not scattered. ---
+  const [autoMode, setAutoMode] = useState(true)
+  const [manualBase, setManualBase] = useState(0)
+  const [onePerNote, setOnePerNote] = useState(true)
+  const [showAll, setShowAll] = useState(false)
+  const maxBase = Math.max(0, fretCount - SPAN)
+  const auto = useMemo(
+    () => autoAnchor(heldNotes, tuning, fretCount, SPAN),
+    [heldNotes, tuning, fretCount],
+  )
+  // "All" widens the window to the whole neck; otherwise it's a position box.
+  const span = showAll ? fretCount : SPAN
+  const base = showAll
+    ? 0
+    : autoMode
+      ? auto
+      : Math.min(Math.max(0, manualBase), maxBase)
+
+  const litAll = shapeWindowPositions(heldNotes, tuning, fretCount, base, span)
+  const lit = onePerNote ? onePerPitchClass(litAll, tuning) : litAll
   const litKeys = new Set(lit.map((p) => `${p.string}-${p.fret}`))
 
-  // In-scale positions that aren't currently played (the faint scale guide).
-  const scaleDots = scaleGuide
-    ? fretPositionsFor(new Set(scaleGuide), tuning, fretCount).filter(
-        (p) => !litKeys.has(`${p.string}-${p.fret}`),
-      )
+  // In-scale positions within the window that aren't currently played.
+  const scaleRaw = scaleGuide
+    ? shapeWindowPositions(new Set(scaleGuide), tuning, fretCount, base, span)
     : []
+  const scaleDeduped = onePerNote ? onePerPitchClass(scaleRaw, tuning) : scaleRaw
+  const scaleDots = scaleDeduped.filter(
+    (p) => !litKeys.has(`${p.string}-${p.fret}`),
+  )
+
+  const move = (delta: number) => {
+    setShowAll(false)
+    setAutoMode(false)
+    setManualBase(Math.min(maxBase, Math.max(0, base + delta)))
+  }
 
   return (
     <figure className="fretboard">
-      <figcaption className="view-title">{label}</figcaption>
+      <figcaption className="view-title view-title--row">
+        <span>{label}</span>
+        <span className="fb-pos">
+          <button
+            type="button"
+            className="fb-pos-btn"
+            onClick={() => move(-1)}
+            disabled={!showAll && base <= 0}
+            aria-label="Move position down the neck"
+          >
+            ◀
+          </button>
+          <span className="fb-pos-label">
+            {showAll ? 'all' : base === 0 ? 'open' : `fr ${base}–${base + SPAN}`}
+          </span>
+          <button
+            type="button"
+            className="fb-pos-btn"
+            onClick={() => move(1)}
+            disabled={!showAll && base >= maxBase}
+            aria-label="Move position up the neck"
+          >
+            ▶
+          </button>
+          <button
+            type="button"
+            className={`fb-pos-auto${autoMode && !showAll ? ' fb-pos-auto--on' : ''}`}
+            onClick={() => {
+              setShowAll(false)
+              setAutoMode(true)
+            }}
+            title="Auto-pick the lowest position covering the whole chord"
+          >
+            Auto
+          </button>
+          <button
+            type="button"
+            className={`fb-pos-auto${showAll ? ' fb-pos-auto--on' : ''}`}
+            onClick={() => setShowAll(true)}
+            title="Show the chord across the whole neck"
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={`fb-pos-auto${onePerNote ? ' fb-pos-auto--on' : ''}`}
+            onClick={() => setOnePerNote((v) => !v)}
+            title={
+              onePerNote
+                ? 'Showing one dot per note — click for every fretting position in the box'
+                : 'Showing every fretting position — click for one dot per note'
+            }
+          >
+            1×
+          </button>
+        </span>
+      </figcaption>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
@@ -72,6 +165,22 @@ export function FretboardView({
           height={(strings - 1) * STRING_GAP}
           className="fb-surface"
         />
+
+        {/* Position-window highlight (hidden in "All" mode). */}
+        {!showAll &&
+          (() => {
+            const x1 = base === 0 ? LABEL_W : nutX + base * FRET_W
+            const x2 = nutX + Math.min(fretCount, base + SPAN) * FRET_W
+            return (
+              <rect
+                x={x1}
+                y={PAD_Y}
+                width={x2 - x1}
+                height={(strings - 1) * STRING_GAP}
+                className="fb-window"
+              />
+            )
+          })()}
 
         {/* Inlay markers (centered vertically). */}
         {Array.from({ length: fretCount }, (_, i) => i + 1).map((f) => {
@@ -129,7 +238,7 @@ export function FretboardView({
           )
         })}
 
-        {/* Faint scale guide: in-key notes that aren't currently played. */}
+        {/* Faint scale guide within the position. */}
         {scaleDots.map(({ string, fret }) => (
           <circle
             key={`scale-${string}-${fret}`}
@@ -141,7 +250,7 @@ export function FretboardView({
           />
         ))}
 
-        {/* Lit note positions. */}
+        {/* Lit note positions (the chord shape in this box). */}
         {lit.map(({ string, fret }) => {
           const pitch = tuning[string] + fret
           const color = pitchColor(pitch)

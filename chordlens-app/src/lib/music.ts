@@ -114,3 +114,114 @@ export function fretPositionsFor(
   }
   return positions
 }
+
+/**
+ * Positions of the held pitch-classes within a single fret window
+ * [base, base+span] — a playable "shape in position" instead of every match
+ * scattered across the neck.
+ */
+export function shapeWindowPositions(
+  heldNotes: Set<number>,
+  tuning: number[],
+  fretCount: number,
+  base: number,
+  span: number,
+): FretPosition[] {
+  const heldPcs = new Set([...heldNotes].map(pitchClass))
+  const lo = Math.max(0, base)
+  const hi = Math.min(fretCount, base + span)
+  const out: FretPosition[] = []
+  for (let string = 0; string < tuning.length; string++) {
+    for (let fret = lo; fret <= hi; fret++) {
+      if (heldPcs.has(pitchClass(tuning[string] + fret))) out.push({ string, fret })
+    }
+  }
+  return out
+}
+
+/**
+ * Lowest window base whose [base, base+span] covers the most distinct held
+ * pitch-classes — the "Auto" position (a complete, low voicing when possible).
+ */
+export function autoAnchor(
+  heldNotes: Set<number>,
+  tuning: number[],
+  fretCount: number,
+  span: number,
+): number {
+  const heldPcs = new Set([...heldNotes].map(pitchClass))
+  if (heldPcs.size === 0) return 0
+  let bestBase = 0
+  let bestCount = -1
+  const maxBase = Math.max(0, fretCount - span)
+  for (let base = 0; base <= maxBase; base++) {
+    const seen = new Set<number>()
+    for (let string = 0; string < tuning.length; string++) {
+      for (let fret = base; fret <= base + span; fret++) {
+        const pc = pitchClass(tuning[string] + fret)
+        if (heldPcs.has(pc)) seen.add(pc)
+      }
+    }
+    if (seen.size > bestCount) {
+      bestCount = seen.size
+      bestBase = base
+    }
+    if (seen.size === heldPcs.size) break // earliest full-coverage = lowest box
+  }
+  return bestBase
+}
+
+/** Anchor (~F3) where a compact voicing's bass note lands on the grand staff. */
+export const VOICING_BASE = 53
+
+/**
+ * Collapse a played chord (which may span several octaves with doubled notes)
+ * into a compact close-position voicing: one note per pitch-class, stacked
+ * ascending from the bass note, anchored near the staff center. Keeps a chord
+ * legible in notation instead of scattering octave doublings/ledger lines.
+ * Shared by NotationView and the progression sheet so they always match.
+ */
+export function compactVoicing(pitches: number[]): number[] {
+  if (pitches.length === 0) return []
+  const sorted = [...pitches].sort((a, b) => a - b)
+  const bassPc = pitchClass(sorted[0])
+  const present = new Set(sorted.map(pitchClass))
+  const order = [bassPc]
+  for (let i = 1; i < 12; i++) {
+    const pc = (bassPc + i) % 12
+    if (present.has(pc)) order.push(pc)
+  }
+  const out: number[] = []
+  let prev = VOICING_BASE + ((((bassPc - VOICING_BASE) % 12) + 12) % 12)
+  out.push(prev)
+  for (let k = 1; k < order.length; k++) {
+    let m = prev + ((((order[k] - prev) % 12) + 12) % 12)
+    if (m <= prev) m += 12
+    out.push(m)
+    prev = m
+  }
+  return out
+}
+
+/**
+ * Keep one position per pitch-class — the lowest (by fret, then string) — so a
+ * note that's playable several ways in a box shows a single dot.
+ */
+export function onePerPitchClass(
+  positions: FretPosition[],
+  tuning: number[],
+): FretPosition[] {
+  const byPc = new Map<number, FretPosition>()
+  for (const p of positions) {
+    const pc = pitchClass(tuning[p.string] + p.fret)
+    const cur = byPc.get(pc)
+    if (
+      !cur ||
+      p.fret < cur.fret ||
+      (p.fret === cur.fret && p.string < cur.string)
+    ) {
+      byPc.set(pc, p)
+    }
+  }
+  return [...byPc.values()]
+}

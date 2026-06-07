@@ -9,7 +9,7 @@ import {
   Formatter,
 } from 'vexflow'
 import { CLEF_SPLIT, NOTE_NAMES, FLAT_NAMES } from '../lib/config'
-import { detectChord, pitchClass } from '../lib/music'
+import { detectChord, pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
 
 const WIDTH = 360
@@ -88,8 +88,11 @@ export function NotationView({ heldNotes, useFlats = false }: Props) {
     renderer.resize(WIDTH, HEIGHT)
     const context = renderer.getContext()
 
-    const treblePitches = pitches.filter((p) => p >= CLEF_SPLIT)
-    const bassPitches = pitches.filter((p) => p < CLEF_SPLIT)
+    // Use the same compact voicing as the progression sheet, so the current
+    // chord here matches its column there.
+    const voiced = compactVoicing(pitches)
+    const treblePitches = voiced.filter((p) => p >= CLEF_SPLIT)
+    const bassPitches = voiced.filter((p) => p < CLEF_SPLIT)
 
     const treble = drawClef(context, TREBLE_Y, 'treble', treblePitches, 'b/4', useFlats)
     const bass = drawClef(context, BASS_Y, 'bass', bassPitches, 'd/3', useFlats)

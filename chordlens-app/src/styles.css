@@ -181,7 +181,7 @@ body {
 }
 
 /* Continuous progression sheet (its own panel below the piano). */
-.panel--sheet { padding-bottom: 12px; }
+.panel--sheet { padding-bottom: 12px; margin-bottom: 16px; }
 .sheet-scroll { margin-top: 6px; }
 .progression-staff {
   width: 100%;
@@ -272,6 +272,19 @@ body {
 }
 .status-demo-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
 .status-demo-btn:disabled { opacity: 0.45; cursor: default; }
+.status-icon-btn {
+  margin-left: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.status-icon-btn:hover { border-color: var(--accent-dim); color: var(--accent); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -293,6 +306,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  margin-bottom: 16px;
 }
 .panel--notation {
   grid-column: 1 / -1;
@@ -380,6 +394,36 @@ body {
   text-anchor: middle;
   dominant-baseline: middle;
 }
+/* Position-window highlight + control. */
+.fb-window { fill: var(--accent); opacity: 0.06; }
+.fb-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.fb-pos-btn,
+.fb-pos-auto {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.fb-pos-btn:hover:not(:disabled),
+.fb-pos-auto:hover { border-color: var(--accent-dim); color: var(--accent); }
+.fb-pos-btn:disabled { opacity: 0.35; cursor: default; }
+.fb-pos-label { color: var(--muted); min-width: 46px; text-align: center; }
+.fb-pos-auto--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* ---- Notation ---- */
 .notation { margin: 0; width: 100%; }
@@ -406,7 +450,7 @@ body {
 /* ---- Push pad grid ---- */
 .push {
   width: 100%;
-  max-height: 360px;
+  max-height: 440px;
   display: block;
   margin: 0 auto;
 }

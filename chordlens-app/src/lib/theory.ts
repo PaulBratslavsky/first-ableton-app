@@ -74,6 +74,16 @@ export function tonicPc(key: MusicalKey): number {
   return Note.chroma(tonicName(key)) ?? 0
 }
 
+/**
+ * Convert Ableton's song key (root pitch-class + scale name) into a MusicalKey.
+ * ChordLens only models major/minor, so any "…minor" scale → minor, else major.
+ */
+export function keyFromAbleton(rootPc: number, scaleName: string): MusicalKey {
+  const tonic = ((Math.round(rootPc) % 12) + 12) % 12
+  const mode: Mode = /min/i.test(scaleName) ? 'minor' : 'major'
+  return { tonic, mode }
+}
+
 /** Does this key's signature use flats? (C major / A minor default to sharps.) */
 export function usesFlats(key: MusicalKey): boolean {
   const name = tonicName(key)
