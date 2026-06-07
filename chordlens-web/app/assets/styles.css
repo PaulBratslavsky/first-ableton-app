@@ -324,9 +324,9 @@ body {
 }
 .view-title--row {
   display: flex;
-  align-items: baseline;
+  align-items: center; /* center (not baseline) so the changing note label can't move the title */
   justify-content: space-between;
-  min-height: 30px; /* reserve height so the changing note label can't shift layout */
+  min-height: 30px;
   gap: 12px;
 }
 .now-playing {

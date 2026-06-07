@@ -410,7 +410,14 @@ export const Visualizer = clientEntry(
             <Piano heldNotes={displayNotes} keyPcs={keyPcs} scaleGuide={scaleGuide} />
             <p
               className="idle-hint"
-              style={{ visibility: displayPitches.length === 0 ? 'visible' : 'hidden' }}
+              style={{
+                // Only when truly idle — not during the gaps between notes once a
+                // source (Ableton / Demo / Web MIDI) is active.
+                visibility:
+                  displayPitches.length === 0 && !connected && !demo && !webMidiOn
+                    ? 'visible'
+                    : 'hidden',
+              }}
             >
               Enable Web MIDI, hit Demo, or play into the ChordLens device in Ableton.
             </p>
