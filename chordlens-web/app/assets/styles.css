@@ -323,19 +323,25 @@ body {
   margin-bottom: 12px;
 }
 .view-title--row {
+  position: relative; /* anchor for the absolutely-positioned now-playing label */
   display: flex;
-  align-items: center; /* center (not baseline) so the changing note label can't move the title */
+  align-items: center;
   justify-content: space-between;
   min-height: 30px;
   gap: 12px;
 }
 .now-playing {
+  /* Out of flow entirely so the changing note label can never affect layout. */
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: var(--accent);
   text-transform: none;
-  white-space: nowrap; /* never wrap to a second line (would change row height) */
+  white-space: nowrap;
   text-align: right;
 }
 .idle-hint {
