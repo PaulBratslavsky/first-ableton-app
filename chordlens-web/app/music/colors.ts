@@ -1,7 +1,7 @@
 // One distinct color per pitch-class, shared across all four views so the same
 // note reads as the same color on piano, guitar, bass, and the staff.
 
-import { pitchClass } from './music'
+import { pitchClass } from './music.ts'
 
 /** 12 vibrant, well-separated hues (chromatic order, C..B). */
 export const PITCH_COLORS = [

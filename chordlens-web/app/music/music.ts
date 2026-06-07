@@ -2,7 +2,7 @@
 // Pure functions, unit-testable, shared by every view (and future v2 server fns).
 
 import { Chord } from 'tonal'
-import { NOTE_NAMES, FLAT_NAMES, OCTAVE_OFFSET } from './config'
+import { NOTE_NAMES, FLAT_NAMES, OCTAVE_OFFSET } from './config.ts'
 
 /** MIDI pitch -> pitch class 0..11 (C=0). Safe for any integer. */
 export function pitchClass(pitch: number): number {
