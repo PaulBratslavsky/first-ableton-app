@@ -85,6 +85,26 @@ Ableton doesn't expose its notes to other apps unless you route them out. On mac
 
 > A plugged-in USB MIDI keyboard skips all of this: just pick it in the dropdown and play.
 
+### Connect Ableton via Max for Live (optional, no IAC bus)
+
+Instead of the IAC routing above, you can drop the **ChordLens Max for Live
+device** on a track. It taps the track's MIDI directly (clip playback included)
+and also bridges Ableton's **Live API**, so ChordLens additionally shows live
+**tempo / transport** and can **control Live** (play/stop, set tempo, fire
+clips). The app talks to the device over a local WebSocket (`:17999`) and the
+**Ableton** chip in the header turns green when connected.
+
+Setup is a one-time paste-and-save in the Max editor — see
+**[`max-for-live/README.md`](max-for-live/README.md)** for the full steps,
+protocol, and how to extend it.
+
+| | IAC bus | Max for Live device |
+|---|---|---|
+| Shows played/clip notes | ✅ | ✅ (no IAC needed) |
+| Live tempo / transport | ❌ | ✅ |
+| Control Ableton from the app | ❌ | ✅ |
+| Setup | macOS MIDI routing | paste device once |
+
 ---
 
 ## Configuration
@@ -112,6 +132,7 @@ chordlens-app/                  # Tauri desktop app (React UI + Rust backend)
     routes/index.tsx            # the single visualizer route "/" (wires every feature)
     hooks/
       usePushMidi.ts            # MIDI source: Tauri events from the Rust backend + demo mode
+      useAbleton.ts             # optional Max for Live bridge (WebSocket): notes + transport + control
       useKeyEstimate.ts         # auto key detection (+ manual override)
       useChordHistory.ts        # records settled chords for the progression strip
     components/
@@ -121,10 +142,12 @@ chordlens-app/                  # Tauri desktop app (React UI + Rust backend)
       ProgressionStrip.tsx      # chord history chips
       KeyBadge.tsx              # detected key + manual override
       StatusIndicator.tsx       # listening / demo state
+      AbletonStatus.tsx         # Max for Live connection + tempo + transport toggle
       InputPicker.tsx           # MIDI input chooser
     lib/
       music.ts                  # tonal wrappers: detectChord, noteName, pitchClass, fretPositionsFor
       theory.ts                 # key estimation, scale, Roman numerals, sharp/flat spelling
+      ableton.ts                # AbletonBridge: auto-reconnecting WebSocket client + typed commands
       colors.ts                 # one color per pitch-class (shared by all views)
       config.ts                 # constants (tunings, ranges, octave convention)
       *.test.ts                 # unit tests for music + theory
@@ -132,6 +155,11 @@ chordlens-app/                  # Tauri desktop app (React UI + Rust backend)
     src/lib.rs                  # midir MIDI reader; emits "midi-note" events; commands
     examples/list_midi.rs       # standalone MIDI-port enumeration check
     Cargo.toml, tauri.conf.json # Rust deps + app/window/bundle config
+max-for-live/                   # optional Ableton bridge device (see its README)
+  ChordLens.maxpat              # patch source (paste → ChordLens.amxd)
+  chordlens.v8.js               # LiveAPI: observe transport + run commands
+  chordlens.server.js           # WebSocket server (node.script) on :17999
+docs/architecture.md            # full system architecture + diagrams
 ```
 
 ## Tech stack
@@ -172,5 +200,6 @@ Started as a passive real-time mirror; the Features above (color, progression hi
 - Tightest hybrid packaging (auto-launch / single installer / signing).
 
 > **Notes on the architecture vs. the original spec:**
-> - The spec described a browser web app fed by a Max for Live device over WebSocket. To make it **install-once / standalone**, it's a **Tauri desktop app** that reads MIDI natively in Rust — the Max device and WebSocket path have been removed. (MIDI is read in the Rust backend, *not* via the browser Web MIDI API — macOS's WebView doesn't support Web MIDI.)
+> - The spec described a browser web app fed by a Max for Live device over WebSocket. To make it **install-once / standalone**, the core app is a **Tauri desktop app** that reads MIDI natively in Rust (no required helper process; MIDI is read in the Rust backend, *not* via the browser Web MIDI API — macOS's WebView doesn't support Web MIDI).
+> - The **Max for Live device is back as an _optional_ bridge** (`max-for-live/`): it adds no-IAC note capture plus Live API features (tempo/transport readout and control) over a local WebSocket. It's not required to run ChordLens — the IAC route and plain MIDI keyboards work without it. See [`docs/architecture.md`](docs/architecture.md).
 > - The frontend is TanStack **Router** (client-side SPA), not TanStack **Start**. v1 needs no SSR/server functions; Start can be layered in for v2's saving/playback features.
