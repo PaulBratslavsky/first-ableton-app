@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChordHistoryEntry } from '../hooks/useChordHistory'
 import { PITCH_COLORS } from '../lib/colors'
 
@@ -7,9 +7,14 @@ interface Props {
   onClear: () => void
 }
 
-/** Horizontal strip of the chords you've played, oldest → newest. */
+/**
+ * Horizontal strip of the chords you've played, oldest → newest. Toggle between
+ * chord symbols (C · Am · F) and the actual notes (C E G · A C E) — handy for
+ * reading a melody/voicing rather than its chord name.
+ */
 export function ProgressionStrip({ history, onClear }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [showNotes, setShowNotes] = useState(false)
 
   // Keep the newest chord in view.
   useEffect(() => {
@@ -32,12 +37,21 @@ export function ProgressionStrip({ history, onClear }: Props) {
                 borderColor:
                   e.rootPc != null ? PITCH_COLORS[e.rootPc] : 'var(--line)',
               }}
+              title={showNotes ? e.label : e.notes.join(' ')}
             >
-              {e.label}
+              {showNotes && e.notes.length ? e.notes.join(' ') : e.label}
             </span>
           ))
         )}
       </div>
+      <button
+        type="button"
+        className={`progression-toggle${showNotes ? ' progression-toggle--active' : ''}`}
+        onClick={() => setShowNotes((s) => !s)}
+        title="Show each chord as its notes, or as a chord symbol"
+      >
+        {showNotes ? '♪ Notes' : 'Chords'}
+      </button>
       <button
         type="button"
         className="progression-clear"

@@ -1,25 +1,27 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePushMidi } from '../hooks/usePushMidi'
+import { useAbleton } from '../hooks/useAbleton'
 import { useKeyEstimate } from '../hooks/useKeyEstimate'
 import { useChordHistory } from '../hooks/useChordHistory'
 import { StatusIndicator } from '../components/StatusIndicator'
+import { AbletonStatus } from '../components/AbletonStatus'
 import { InputPicker } from '../components/InputPicker'
 import { KeyBadge } from '../components/KeyBadge'
 import { ProgressionStrip } from '../components/ProgressionStrip'
 import { PianoView } from '../components/PianoView'
+import { PushView } from '../components/PushView'
 import { FretboardView } from '../components/FretboardView'
 import { NotationView } from '../components/NotationView'
 import { detectChord } from '../lib/music'
-import { romanNumeral, scalePcs, usesFlats } from '../lib/theory'
+import { romanNumeral, scalePcs, tonicPc, usesFlats } from '../lib/theory'
 import { GUITAR_TUNING, BASS_TUNING, FRET_COUNT } from '../lib/config'
 
 export const Route = createFileRoute('/')({ component: Visualizer })
 
 function Visualizer() {
   const {
-    heldNotes,
-    pitches,
+    heldNotes: midiHeld,
     status,
     inputs,
     selectedInput,
@@ -27,6 +29,23 @@ function Visualizer() {
     selectInput,
     toggleDemo,
   } = usePushMidi()
+
+  // Notes + transport from the ChordLens Max for Live device (max-for-live/).
+  const live = useAbleton()
+
+  // The views react to either input path: the IAC bus / keyboard (usePushMidi)
+  // or notes played straight into the Max for Live device.
+  const heldNotes = useMemo(() => {
+    if (live.heldNotes.size === 0) return midiHeld
+    if (midiHeld.size === 0) return live.heldNotes
+    const merged = new Set(midiHeld)
+    live.heldNotes.forEach((n) => merged.add(n))
+    return merged
+  }, [midiHeld, live.heldNotes])
+  const pitches = useMemo(
+    () => [...heldNotes].sort((a, b) => a - b),
+    [heldNotes],
+  )
 
   // --- Pin / freeze a voicing -----------------------------------------------
   const [pinned, setPinned] = useState<Set<number> | null>(null)
@@ -63,7 +82,9 @@ function Visualizer() {
   const { key, isAuto, setManualKey } = useKeyEstimate(pitches, frozen)
   const useFlats = key ? usesFlats(key) : false
   const keyPcs = useMemo(() => (key ? scalePcs(key) : null), [key])
+  const rootPc = key ? tonicPc(key) : null
   const [showScale, setShowScale] = useState(true)
+  const [showPush, setShowPush] = useState(true)
   const scaleGuide = showScale ? keyPcs : null
 
   const chord = detectChord(displayPitches, useFlats)
@@ -75,7 +96,11 @@ function Visualizer() {
     ? (liveChord.chordSymbol ??
       (pitches.length === 1 ? liveChord.noteNames[0] : null))
     : null
-  const { history, clear } = useChordHistory(historyLabel, liveChord?.bassPc ?? null)
+  const { history, clear } = useChordHistory(
+    historyLabel,
+    liveChord?.bassPc ?? null,
+    liveChord?.noteNames ?? [],
+  )
 
   const isIdle = displayPitches.length === 0
   const nowPlaying = chord?.chordSymbol ?? chord?.noteNames.join(' · ') ?? ' '
@@ -107,6 +132,14 @@ function Visualizer() {
           </button>
           <button
             type="button"
+            className={`pin-btn${showPush ? ' pin-btn--active' : ''}`}
+            onClick={() => setShowPush((s) => !s)}
+            title="Show the Push-style chromatic pad grid"
+          >
+            Push
+          </button>
+          <button
+            type="button"
             className={`pin-btn${frozen ? ' pin-btn--active' : ''}`}
             onClick={togglePin}
             disabled={!frozen && heldNotes.size === 0}
@@ -115,6 +148,12 @@ function Visualizer() {
             {frozen ? '📌 Pinned' : 'Pin'}
           </button>
           <StatusIndicator status={status} onToggleDemo={toggleDemo} />
+          <AbletonStatus
+            connected={live.connected}
+            tempo={live.tempo}
+            isPlaying={live.isPlaying}
+            onTogglePlay={live.isPlaying ? live.stopPlayback : live.startPlayback}
+          />
         </div>
       </header>
 
@@ -132,8 +171,8 @@ function Visualizer() {
         <PianoView heldNotes={displayNotes} keyPcs={keyPcs} scaleGuide={scaleGuide} />
         {/* Always rendered (hidden while playing) so the panel never resizes. */}
         <p className="idle-hint" style={{ visibility: isIdle ? 'visible' : 'hidden' }}>
-          {status === 'no-input'
-            ? 'Choose a MIDI input above (your keyboard, or an IAC bus from Ableton) to begin.'
+          {status === 'no-input' && !live.connected
+            ? 'Choose a MIDI input above, or play into the ChordLens device in Ableton, to begin.'
             : 'Play something — the views will light up here.'}
         </p>
       </section>
@@ -164,6 +203,16 @@ function Visualizer() {
         <div className="panel panel--notation">
           <NotationView heldNotes={displayNotes} useFlats={useFlats} />
         </div>
+        {showPush && (
+          <div className="panel">
+            <div className="view-title">Push · chromatic</div>
+            <PushView
+              heldNotes={displayNotes}
+              scalePcs={keyPcs}
+              rootPc={rootPc}
+            />
+          </div>
+        )}
       </section>
     </main>
   )

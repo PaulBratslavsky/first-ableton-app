@@ -4,6 +4,8 @@ export interface ChordHistoryEntry {
   label: string
   /** Pitch-class of the chord root, for coloring the chip. */
   rootPc: number | null
+  /** Note names that made up the chord (for the "notes" view). */
+  notes: string[]
 }
 
 const SETTLE_MS = 300 // a chord must be held this long to be recorded
@@ -12,10 +14,19 @@ const MAX_ENTRIES = 24
 /**
  * Records the chords you actually settle on (held ~300ms), de-duplicating
  * consecutive repeats, so the strip reads like a progression: C · Am · F · G.
+ *
+ * `notes` is read through a ref so updating it every render doesn't reset the
+ * settle timer — only `label`/`rootPc` drive recording.
  */
-export function useChordHistory(label: string | null, rootPc: number | null) {
+export function useChordHistory(
+  label: string | null,
+  rootPc: number | null,
+  notes: string[],
+) {
   const [history, setHistory] = useState<ChordHistoryEntry[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const notesRef = useRef(notes)
+  notesRef.current = notes
 
   useEffect(() => {
     if (!label) return
@@ -23,7 +34,9 @@ export function useChordHistory(label: string | null, rootPc: number | null) {
     timer.current = setTimeout(() => {
       setHistory((prev) => {
         if (prev.length && prev[prev.length - 1].label === label) return prev
-        return [...prev, { label, rootPc }].slice(-MAX_ENTRIES)
+        return [...prev, { label, rootPc, notes: notesRef.current }].slice(
+          -MAX_ENTRIES,
+        )
       })
     }, SETTLE_MS)
     return () => clearTimeout(timer.current)
