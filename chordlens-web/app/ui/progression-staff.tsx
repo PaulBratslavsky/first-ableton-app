@@ -36,13 +36,14 @@ export function ProgressionStaff(handle: Handle<Props>) {
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
 
-    node.innerHTML = ''
+    // Render offscreen, swap in atomically (never blank the live node → no flicker).
+    const tmp = document.createElement('div')
     const staveW = Math.max(width - 4, 200)
     const usable = staveW - PAD_LEFT - PAD_RIGHT
     const capacity = Math.max(1, Math.floor(usable / PER_CHORD))
     const visible = history.slice(-capacity)
 
-    const renderer = new Renderer(node, Renderer.Backends.SVG)
+    const renderer = new Renderer(tmp, Renderer.Backends.SVG)
     renderer.resize(staveW, HEIGHT)
     const ctx = renderer.getContext()
 
@@ -53,7 +54,10 @@ export function ProgressionStaff(handle: Handle<Props>) {
     new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
 
-    if (visible.length === 0) return
+    if (visible.length === 0) {
+      node.replaceChildren(...tmp.childNodes)
+      return
+    }
 
     const build = (clefPitches: number[], restKey: string, clef: 'treble' | 'bass') => {
       if (clefPitches.length === 0) {
@@ -82,6 +86,8 @@ export function ProgressionStaff(handle: Handle<Props>) {
     new Formatter().joinVoices([tVoice, bVoice]).format([tVoice, bVoice], formatW)
     tVoice.draw(ctx, treble)
     bVoice.draw(ctx, bass)
+
+    node.replaceChildren(...tmp.childNodes)
   }
 
   return () => {
@@ -98,7 +104,9 @@ export function ProgressionStaff(handle: Handle<Props>) {
           node = n as HTMLDivElement
           const ro = new ResizeObserver((entries) => {
             const w = entries[0]?.contentRect.width
-            if (w && w > 0) {
+            // Only redraw on an actual width change — guards against a
+            // ResizeObserver feedback loop (draw → resize → draw → …).
+            if (w && w > 0 && Math.round(w) !== width) {
               width = Math.round(w)
               draw()
             }

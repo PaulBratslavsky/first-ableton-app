@@ -242,6 +242,8 @@ export const Visualizer = clientEntry(
                 ChordLens{' '}
                 <span
                   style={{
+                    display: 'inline-block',
+                    'white-space': 'nowrap',
                     'font-size': '12px',
                     'font-weight': 600,
                     color: 'var(--accent)',

@@ -49,8 +49,10 @@ export function Notation(handle: Handle<Props>) {
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
 
-    node.innerHTML = ''
-    const renderer = new Renderer(node, Renderer.Backends.SVG)
+    // Render offscreen then swap in atomically — clearing the live node before
+    // the async import left it blank between frames (the flicker).
+    const tmp = document.createElement('div')
+    const renderer = new Renderer(tmp, Renderer.Backends.SVG)
     renderer.resize(WIDTH, HEIGHT)
     const ctx = renderer.getContext()
 
@@ -84,6 +86,8 @@ export function Notation(handle: Handle<Props>) {
     new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw()
+
+    node.replaceChildren(...tmp.childNodes)
   }
 
   return () => {
