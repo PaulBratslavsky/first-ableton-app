@@ -92,6 +92,15 @@ function ensureObservers() {
     var tempo = new LiveAPI(onTempo, 'live_set');
     tempo.property = 'tempo';
     observers.push(tempo);
+
+    // Song key: root_note (0-11) + scale_name. Either changing re-emits both.
+    var rootObs = new LiveAPI(onKey, 'live_set');
+    rootObs.property = 'root_note';
+    observers.push(rootObs);
+
+    var scaleObs = new LiveAPI(onKey, 'live_set');
+    scaleObs.property = 'scale_name';
+    observers.push(scaleObs);
   } catch (e) {
     observersReady = false; // let the next command retry
     replyError(null, 'observer init failed: ' + e);
@@ -107,6 +116,15 @@ function onTransport(args) {
 function onTempo(args) {
   if (!args || args[0] !== 'tempo') return;
   emit({ type: 'tempo', tempo: args[1] });
+}
+
+function onKey() {
+  emit(keyInfo());
+}
+
+function keyInfo() {
+  var ls = api('live_set');
+  return { type: 'key', rootPc: num(ls, 'root_note'), scaleName: str(ls, 'scale_name') };
 }
 
 // ── Command dispatch ──────────────────────────────────────────────────────
@@ -184,6 +202,12 @@ function num(api, prop) {
   return v && v.length ? v[0] : null;
 }
 
+function str(api, prop) {
+  var v = api.get(prop);
+  if (Array.isArray(v)) return v.length ? String(v[0]) : '';
+  return v == null ? '' : String(v);
+}
+
 function sessionInfo() {
   var liveSet = api('live_set');
   return {
@@ -193,6 +217,8 @@ function sessionInfo() {
     signatureDenominator: num(liveSet, 'signature_denominator'),
     trackCount: liveSet.getcount('tracks'),
     returnTrackCount: liveSet.getcount('return_tracks'),
+    rootPc: num(liveSet, 'root_note'),
+    scaleName: str(liveSet, 'scale_name'),
   };
 }
 
