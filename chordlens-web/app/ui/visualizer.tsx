@@ -92,6 +92,7 @@ export const Visualizer = clientEntry(
             rootPc: chord?.bassPc ?? null,
             notes: chord?.noteNames ?? [],
             pitches,
+            t: Date.now(), // onset time → drives timing-accurate notation
           }
           settleTimer = setTimeout(() => {
             if (history.length && history[history.length - 1].label === entry.label) return
@@ -367,7 +368,7 @@ export const Visualizer = clientEntry(
                   Play a progression — it'll be written out here, chord by chord.
                 </p>
               ) : (
-                <ProgressionStaff history={history} useFlats={useFlats} />
+                <ProgressionStaff history={history} useFlats={useFlats} tempo={tempo} />
               )}
             </div>
           </section>

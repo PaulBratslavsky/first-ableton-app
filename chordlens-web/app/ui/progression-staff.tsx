@@ -4,12 +4,36 @@ import { pitchClass, compactVoicing } from '../music/music.ts'
 import { pitchColor } from '../music/colors.ts'
 import type { ChordHistoryEntry } from './progression-strip.tsx'
 
-const PER_CHORD = 64
 const PAD_LEFT = 56
 const PAD_RIGHT = 16
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
+const PX_PER_BEAT = 40
+const MIN_PER_CHORD = 28 // rough width budget per chord for the visible-count cap
+
+// Note values we quantize real durations onto (no dotted/triplets for now).
+const STEPS: { beats: number; code: string }[] = [
+  { beats: 0.25, code: '16' },
+  { beats: 0.5, code: '8' },
+  { beats: 1, code: 'q' },
+  { beats: 2, code: 'h' },
+  { beats: 4, code: 'w' },
+]
+
+function quantize(beats: number) {
+  const b = Math.min(4, Math.max(0.25, beats))
+  let best = STEPS[0]
+  let bestDiff = Infinity
+  for (const s of STEPS) {
+    const diff = Math.abs(Math.log(s.beats) - Math.log(b))
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = s
+    }
+  }
+  return best
+}
 
 function toVexKey(pitch: number, useFlats: boolean) {
   const name = (useFlats ? FLAT_NAMES : NOTE_NAMES)[pitchClass(pitch)]
@@ -22,17 +46,40 @@ function toVexKey(pitch: number, useFlats: boolean) {
 interface Props {
   history: ChordHistoryEntry[]
   useFlats?: boolean
+  tempo?: number | null
 }
 
-/** Remix 3 port of ProgressionStaff — one continuous grand staff. */
+/** Continuous grand staff — note durations/spacing reflect actual play timing. */
 export function ProgressionStaff(handle: Handle<Props>) {
   let node: HTMLDivElement | null = null
   let width = 900
-  let lastKey = ''
+  let rafScheduled = false
+  let cachedSvg: Node | null = null
+  let cachedKey = ''
+
+  function scheduleDraw() {
+    if (rafScheduled || typeof requestAnimationFrame === 'undefined') return
+    rafScheduled = true
+    requestAnimationFrame(() => {
+      rafScheduled = false
+      draw()
+    })
+  }
 
   async function draw() {
     if (!node) return
-    const { history, useFlats = false } = handle.props
+    const { history, useFlats = false, tempo } = handle.props
+    const key =
+      history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|') +
+      `@${tempo ?? 0}#${width}`
+
+    // Cheap path: content unchanged — just re-attach the cached SVG if remix
+    // wiped it on reconcile. Only rebuild when notes/timing/width changed.
+    if (key === cachedKey && cachedSvg) {
+      if (node.firstChild !== cachedSvg) node.replaceChildren(cachedSvg)
+      return
+    }
+
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
 
@@ -40,7 +87,7 @@ export function ProgressionStaff(handle: Handle<Props>) {
     const tmp = document.createElement('div')
     const staveW = Math.max(width - 4, 200)
     const usable = staveW - PAD_LEFT - PAD_RIGHT
-    const capacity = Math.max(1, Math.floor(usable / PER_CHORD))
+    const capacity = Math.max(1, Math.floor(usable / MIN_PER_CHORD))
     const visible = history.slice(-capacity)
 
     const renderer = new Renderer(tmp, Renderer.Backends.SVG)
@@ -55,16 +102,34 @@ export function ProgressionStaff(handle: Handle<Props>) {
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
 
     if (visible.length === 0) {
-      node.replaceChildren(...tmp.childNodes)
+      cachedSvg = tmp.firstChild
+      cachedKey = key
+      if (cachedSvg) node.replaceChildren(cachedSvg)
       return
     }
 
-    const build = (clefPitches: number[], restKey: string, clef: 'treble' | 'bass') => {
+    // Real durations: time each chord was held, in beats, quantized to a note value.
+    const bpm = tempo && tempo > 0 ? tempo : 120
+    const beatMs = 60000 / bpm
+    const now = Date.now()
+    const durs = visible.map((e, i) => {
+      const start = e.t ?? now
+      const end = i + 1 < visible.length ? (visible[i + 1].t ?? now) : now
+      const ms = Math.max(60, end - start)
+      return quantize(ms / beatMs)
+    })
+
+    const build = (
+      clefPitches: number[],
+      restKey: string,
+      clef: 'treble' | 'bass',
+      code: string,
+    ) => {
       if (clefPitches.length === 0) {
-        return new StaveNote({ keys: [restKey], duration: 'wr', clef })
+        return new StaveNote({ keys: [restKey], duration: `${code}r`, clef })
       }
       const parts = clefPitches.map((p) => toVexKey(p, useFlats))
-      const note = new StaveNote({ keys: parts.map((p) => p.key), duration: 'w', clef })
+      const note = new StaveNote({ keys: parts.map((p) => p.key), duration: code, clef })
       parts.forEach((p, i) => {
         if (p.accidental) note.addModifier(new Accidental(p.accidental), i)
         const color = pitchColor(clefPitches[i])
@@ -73,30 +138,34 @@ export function ProgressionStaff(handle: Handle<Props>) {
       return note
     }
 
-    const n = visible.length
     const voicings = visible.map((e) => compactVoicing(e.pitches ?? []))
-    const trebleNotes = voicings.map((v) => build(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble'))
-    const bassNotes = voicings.map((v) => build(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass'))
+    const trebleNotes = voicings.map((v, i) =>
+      build(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', durs[i].code),
+    )
+    const bassNotes = voicings.map((v, i) =>
+      build(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', durs[i].code),
+    )
 
-    const tVoice = new Voice({ numBeats: n * 4, beatValue: 4 }).setMode(Voice.Mode.SOFT)
+    const totalBeats = durs.reduce((sum, d) => sum + d.beats, 0)
+    const tVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
     tVoice.addTickables(trebleNotes)
-    const bVoice = new Voice({ numBeats: n * 4, beatValue: 4 }).setMode(Voice.Mode.SOFT)
+    const bVoice = new Voice({ numBeats: totalBeats, beatValue: 4 }).setMode(Voice.Mode.SOFT)
     bVoice.addTickables(bassNotes)
-    const formatW = Math.min(usable, n * PER_CHORD)
+    const formatW = Math.min(usable, Math.max(160, totalBeats * PX_PER_BEAT))
     new Formatter().joinVoices([tVoice, bVoice]).format([tVoice, bVoice], formatW)
     tVoice.draw(ctx, treble)
     bVoice.draw(ctx, bass)
 
-    node.replaceChildren(...tmp.childNodes)
+    cachedSvg = tmp.firstChild
+    cachedKey = key
+    if (cachedSvg) node.replaceChildren(cachedSvg)
   }
 
   return () => {
-    const { history } = handle.props
-    const key = history.map((e) => (e.pitches ?? []).join(',')).join('|')
-    if (key !== lastKey) {
-      lastKey = key
-      handle.queueTask(() => draw())
-    }
+    // Always reschedule: remix/ui wipes the imperatively-drawn SVG on each
+    // reconcile, so refill after every commit (draw() reuses a cached SVG when
+    // the content key is unchanged, so this stays cheap).
+    scheduleDraw()
     return (
       <div
         className="progression-staff"
@@ -104,8 +173,7 @@ export function ProgressionStaff(handle: Handle<Props>) {
           node = n as HTMLDivElement
           const ro = new ResizeObserver((entries) => {
             const w = entries[0]?.contentRect.width
-            // Only redraw on an actual width change — guards against a
-            // ResizeObserver feedback loop (draw → resize → draw → …).
+            // Only redraw on an actual width change — guards a ResizeObserver loop.
             if (w && w > 0 && Math.round(w) !== width) {
               width = Math.round(w)
               draw()

@@ -6,6 +6,7 @@ export interface ChordHistoryEntry {
   rootPc: number | null
   notes: string[]
   pitches: number[]
+  t: number // ms timestamp when this chord became active (for timing-accurate notation)
 }
 
 interface Props {

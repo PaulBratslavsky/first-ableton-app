@@ -26,12 +26,12 @@ interface Props {
 /** Remix 3 port of NotationView — VexFlow grand staff (client-rendered). */
 export function Notation(handle: Handle<Props>) {
   let node: HTMLDivElement | null = null
-  let lastKey = ''
   let rafScheduled = false
+  let cachedSvg: Node | null = null
+  let cachedKey = ''
 
-  // Coalesce redraws to one per animation frame, always drawing the latest
-  // props — unlike queueTask, this isn't cancelled when the component
-  // re-renders, so fast note changes still draw promptly (not on a fixed beat).
+  // Coalesce redraws to one per animation frame. Runs on every render so the
+  // SVG is refilled right after remix/ui reconciles (and wipes) the canvas.
   function scheduleDraw() {
     if (rafScheduled || typeof requestAnimationFrame === 'undefined') return
     rafScheduled = true
@@ -45,6 +45,14 @@ export function Notation(handle: Handle<Props>) {
     if (!node) return
     const { heldNotes, useFlats = false } = handle.props
     const pitches = compactVoicing([...heldNotes].sort((a, b) => a - b))
+    const key = `${pitches.join(',')}|${useFlats}`
+
+    // Cheap path: content unchanged — just re-attach the cached SVG if remix
+    // wiped it. Only rebuild (expensive) when the chord actually changed.
+    if (key === cachedKey && cachedSvg) {
+      if (node.firstChild !== cachedSvg) node.replaceChildren(cachedSvg)
+      return
+    }
 
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, Voice, Formatter } = VF
@@ -87,18 +95,19 @@ export function Notation(handle: Handle<Props>) {
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
     new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw()
 
-    node.replaceChildren(...tmp.childNodes)
+    cachedSvg = tmp.firstChild
+    cachedKey = key
+    if (cachedSvg) node.replaceChildren(cachedSvg)
   }
 
   return () => {
     const { heldNotes, useFlats = false } = handle.props
     const pitches = [...heldNotes].sort((a, b) => a - b)
     const chord = detectChord(pitches, useFlats)
-    const key = pitches.join(',') + '|' + useFlats
-    if (key !== lastKey) {
-      lastKey = key
-      scheduleDraw()
-    }
+    // Always reschedule: remix/ui reconciles this div on every re-render and
+    // wipes the imperatively-drawn SVG, so we must refill after each commit.
+    // draw() itself skips the expensive rebuild when the content is unchanged.
+    scheduleDraw()
     return (
       <figure className="notation">
         <figcaption className="view-title">

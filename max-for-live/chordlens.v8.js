@@ -84,26 +84,23 @@ function cmd(jsonStr) {
 function ensureObservers() {
   if (observersReady) return;
   observersReady = true;
+
+  // Each observer is isolated: a failure on one (e.g. an older Live without
+  // an observable `scale_name`) must NOT take down transport/tempo. Critical
+  // transport + tempo first; song-key observers are best-effort.
+  addObserver(onTransport, 'is_playing');
+  addObserver(onTempo, 'tempo');
+  addObserver(onKey, 'root_note');
+  addObserver(onKey, 'scale_name');
+}
+
+function addObserver(callback, prop) {
   try {
-    var playing = new LiveAPI(onTransport, 'live_set');
-    playing.property = 'is_playing';
-    observers.push(playing);
-
-    var tempo = new LiveAPI(onTempo, 'live_set');
-    tempo.property = 'tempo';
-    observers.push(tempo);
-
-    // Song key: root_note (0-11) + scale_name. Either changing re-emits both.
-    var rootObs = new LiveAPI(onKey, 'live_set');
-    rootObs.property = 'root_note';
-    observers.push(rootObs);
-
-    var scaleObs = new LiveAPI(onKey, 'live_set');
-    scaleObs.property = 'scale_name';
-    observers.push(scaleObs);
+    var obs = new LiveAPI(callback, 'live_set');
+    obs.property = prop;
+    observers.push(obs);
   } catch (e) {
-    observersReady = false; // let the next command retry
-    replyError(null, 'observer init failed: ' + e);
+    emit({ type: 'error', message: 'observer ' + prop + ' unavailable: ' + e });
   }
 }
 
@@ -198,14 +195,22 @@ function dispatch(msg) {
 // ── Read helpers ──────────────────────────────────────────────────────────
 
 function num(api, prop) {
-  var v = api.get(prop);
-  return v && v.length ? v[0] : null;
+  try {
+    var v = api.get(prop);
+    return v && v.length ? v[0] : null;
+  } catch (e) {
+    return null; // property not available in this Live version — don't poison the caller
+  }
 }
 
 function str(api, prop) {
-  var v = api.get(prop);
-  if (Array.isArray(v)) return v.length ? String(v[0]) : '';
-  return v == null ? '' : String(v);
+  try {
+    var v = api.get(prop);
+    if (Array.isArray(v)) return v.length ? String(v[0]) : '';
+    return v == null ? '' : String(v);
+  } catch (e) {
+    return '';
+  }
 }
 
 function sessionInfo() {
