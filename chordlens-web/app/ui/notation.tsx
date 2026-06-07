@@ -27,6 +27,19 @@ interface Props {
 export function Notation(handle: Handle<Props>) {
   let node: HTMLDivElement | null = null
   let lastKey = ''
+  let rafScheduled = false
+
+  // Coalesce redraws to one per animation frame, always drawing the latest
+  // props — unlike queueTask, this isn't cancelled when the component
+  // re-renders, so fast note changes still draw promptly (not on a fixed beat).
+  function scheduleDraw() {
+    if (rafScheduled || typeof requestAnimationFrame === 'undefined') return
+    rafScheduled = true
+    requestAnimationFrame(() => {
+      rafScheduled = false
+      draw()
+    })
+  }
 
   async function draw() {
     if (!node) return
@@ -80,7 +93,7 @@ export function Notation(handle: Handle<Props>) {
     const key = pitches.join(',') + '|' + useFlats
     if (key !== lastKey) {
       lastKey = key
-      handle.queueTask(() => draw())
+      scheduleDraw()
     }
     return (
       <figure className="notation">

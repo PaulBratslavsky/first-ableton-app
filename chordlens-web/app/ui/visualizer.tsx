@@ -238,7 +238,23 @@ export const Visualizer = clientEntry(
         <main className="app">
           <header className="app-header">
             <div className="app-brand">
-              <h1>ChordLens</h1>
+              <h1>
+                ChordLens{' '}
+                <span
+                  style={{
+                    'font-size': '12px',
+                    'font-weight': 600,
+                    color: 'var(--accent)',
+                    border: '1px solid var(--accent-dim)',
+                    'border-radius': '999px',
+                    padding: '2px 10px',
+                    'vertical-align': 'middle',
+                    'margin-left': '8px',
+                  }}
+                >
+                  ⚡ Built with Remix 3
+                </span>
+              </h1>
               <p className="app-tagline">Your playing, in instruments at once · web</p>
             </div>
             <div className="app-controls">
