@@ -44,6 +44,7 @@ wss.on('error', (err) => {
 
 wss.on('connection', (ws) => {
   clients.add(ws);
+  ws.isAlive = true;
   Max.post(`ChordLens client connected (${clients.size} total)`);
 
   // Greet + replay cached state.
@@ -53,12 +54,23 @@ wss.on('connection', (ws) => {
   // Ask v8 for a fresh session snapshot for this client.
   toLive({ type: 'get_session' });
 
+  // Protocol-level pong (from ws.ping below) marks the client alive.
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   ws.on('message', (raw) => {
+    ws.isAlive = true;
     let msg;
     try {
       msg = JSON.parse(raw.toString());
     } catch (e) {
       send(ws, { type: 'error', message: `bad json: ${e.message}` });
+      return;
+    }
+    // App-level heartbeat: answer pings, don't forward them to Live.
+    if (msg.type === 'ping') {
+      send(ws, { type: 'pong' });
       return;
     }
     toLive(msg);
@@ -70,6 +82,32 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('error', () => clients.delete(ws));
+});
+
+// Drop clients that stop responding to pings (half-open sockets).
+const keepAlive = setInterval(() => {
+  for (const ws of clients) {
+    if (ws.isAlive === false) {
+      clients.delete(ws);
+      ws.terminate();
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch (e) {
+      clients.delete(ws);
+    }
+  }
+}, 10000);
+wss.on('close', () => clearInterval(keepAlive));
+
+// Never let a stray error take the WebSocket server (and the bridge) down.
+process.on('uncaughtException', (err) => {
+  Max.post(`ChordLens uncaught: ${err.message}`, Max.POST_LEVELS.ERROR);
+});
+process.on('unhandledRejection', (reason) => {
+  Max.post(`ChordLens unhandled rejection: ${reason}`, Max.POST_LEVELS.ERROR);
 });
 
 function send(ws, obj) {
@@ -90,7 +128,7 @@ function toLive(obj) {
 
 // ── Inbound from the Max patch ────────────────────────────────────────────
 
-// MIDI note from [notein]→[pack]→[prepend note]:  note <pitch> <velocity>
+// MIDI note from [midiin]→[midiparse]→[prepend note]:  note <pitch> <velocity>
 Max.addHandler('note', (pitch, velocity) => {
   broadcast({ type: 'note', pitch: Number(pitch), velocity: Number(velocity) });
 });

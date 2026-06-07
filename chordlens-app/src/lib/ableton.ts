@@ -68,6 +68,14 @@ export interface AbletonBridgeOptions {
   reconnectMs?: number
   /** Per-command reply timeout in ms (default 5000). */
   commandTimeoutMs?: number
+  /** How often to send a heartbeat ping in ms (default 8000). */
+  heartbeatMs?: number
+  /**
+   * If no message (event, reply, or pong) arrives within this window, the
+   * connection is treated as dead and force-reconnected (default 20000).
+   * Catches silently dropped/half-open sockets the browser won't report.
+   */
+  heartbeatTimeoutMs?: number
 }
 
 /**
@@ -82,10 +90,15 @@ export class AbletonBridge {
   private pending = new Map<number, Pending>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private lastMessageAt = 0
+
   private onEvent?: (event: AbletonEvent) => void
   private onStatus?: (status: BridgeStatus) => void
   private reconnectMs: number
   private commandTimeoutMs: number
+  private heartbeatMs: number
+  private heartbeatTimeoutMs: number
 
   constructor(opts: AbletonBridgeOptions = {}) {
     this.url = opts.url ?? DEFAULT_ABLETON_WS
@@ -93,6 +106,8 @@ export class AbletonBridge {
     this.onStatus = opts.onStatus
     this.reconnectMs = opts.reconnectMs ?? 1500
     this.commandTimeoutMs = opts.commandTimeoutMs ?? 5000
+    this.heartbeatMs = opts.heartbeatMs ?? 8000
+    this.heartbeatTimeoutMs = opts.heartbeatTimeoutMs ?? 20000
   }
 
   connect(): void {
@@ -111,15 +126,22 @@ export class AbletonBridge {
     }
     this.ws = ws
 
-    ws.onopen = () => this.onStatus?.('open')
+    ws.onopen = () => {
+      this.onStatus?.('open')
+      this.lastMessageAt = Date.now()
+      this.startHeartbeat()
+    }
 
     ws.onmessage = (ev) => {
+      // Any inbound traffic proves the link is alive.
+      this.lastMessageAt = Date.now()
       let msg: Record<string, unknown>
       try {
         msg = JSON.parse(ev.data as string)
       } catch {
         return
       }
+      if (msg.type === 'pong') return // heartbeat ack — nothing else to do
       // Command reply?
       if (typeof msg.id === 'number') {
         const p = this.pending.get(msg.id)
@@ -135,12 +157,43 @@ export class AbletonBridge {
     }
 
     ws.onclose = () => {
+      this.stopHeartbeat()
       this.onStatus?.('closed')
       this.failAllPending(new Error('connection closed'))
       if (!this.closedByUser) this.scheduleReconnect()
     }
 
     ws.onerror = () => ws.close()
+  }
+
+  /**
+   * Periodically ping the device and, if no traffic has arrived within
+   * heartbeatTimeoutMs, force-close the socket so onclose triggers a reconnect.
+   * Browsers don't surface dropped/half-open sockets, so this is the only way
+   * to notice "connected but silent" links.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.isOpen) return
+      if (Date.now() - this.lastMessageAt > this.heartbeatTimeoutMs) {
+        // Dead link — drop it and let onclose reconnect.
+        this.ws?.close()
+        return
+      }
+      try {
+        this.ws!.send(JSON.stringify({ type: 'ping' }))
+      } catch {
+        this.ws?.close()
+      }
+    }, this.heartbeatMs)
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
   }
 
   private scheduleReconnect(): void {
@@ -191,6 +244,7 @@ export class AbletonBridge {
 
   close(): void {
     this.closedByUser = true
+    this.stopHeartbeat()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
