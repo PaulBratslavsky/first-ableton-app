@@ -12,16 +12,17 @@ import { pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
 import type { ChordHistoryEntry } from '../hooks/useChordHistory'
 
-// Continuously-scrolling grand staff. A static clef/staff layer sits behind a
-// notes layer positioned by absolute time; a requestAnimationFrame loop
-// translates the notes layer by elapsed×pixels-per-beat (from the track BPM), so
-// notes drift right→left at tempo with a playhead at the right edge.
+// Continuously-scrolling grand staff driven by a "play clock" that only advances
+// while the track is running, so the scroll pauses with the transport (no jump
+// on resume). Static clef layer + a notes layer translated each frame by
+// elapsed×pixels-per-beat (track BPM).
 const PAD_RIGHT = 28
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
 const PX_PER_BEAT = 56
-const WINDOW_MS = 90_000
+const MIN_GAP = 40
+const WINDOW_MS = 120_000
 
 const STEPS: { beats: number; code: string }[] = [
   { beats: 0.25, code: '16' },
@@ -56,20 +57,39 @@ function toVexKey(pitch: number, useFlats: boolean) {
 interface Props {
   history: ChordHistoryEntry[]
   useFlats?: boolean
-  /** Track tempo (BPM) — sets the scroll speed; falls back to 120. */
   tempo?: number | null
+  /** Whether the timeline should advance (Ableton playing / demo / MIDI input). */
+  running?: boolean
 }
 
-export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
+export function ProgressionStaff({ history, useFlats = false, tempo, running = true }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(900)
-  const originT = useRef<number | null>(null)
   const noteStartX = useRef(56)
   const rightEdge = useRef(800)
+  const playMs = useRef(0)
+  const lastWall = useRef<number | null>(null)
+  const originStamp = useRef<number | null>(null)
+  const stamps = useRef(new Map<string, number>())
   const tempoRef = useRef(tempo)
   tempoRef.current = tempo
+  const runningRef = useRef(running)
+  runningRef.current = running
 
-  // Track panel width.
+  const ppm = () => {
+    const bpm = tempoRef.current && tempoRef.current > 0 ? tempoRef.current : 120
+    return PX_PER_BEAT / (60000 / bpm)
+  }
+  const advanceClock = () => {
+    const wall = Date.now()
+    if (lastWall.current != null && runningRef.current) playMs.current += wall - lastWall.current
+    lastWall.current = wall
+  }
+  const scrollX = () =>
+    originStamp.current == null
+      ? rightEdge.current - noteStartX.current
+      : rightEdge.current - noteStartX.current - (playMs.current - originStamp.current) * ppm()
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -81,7 +101,6 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
     return () => ro.disconnect()
   }, [])
 
-  // Build the static + notes layers when the notes / width / tempo change.
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -110,9 +129,8 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
 
     const bpm = tempo && tempo > 0 ? tempo : 120
     const beatMs = 60000 / bpm
-    const ppm = PX_PER_BEAT / beatMs
     const now = Date.now()
-    if (originT.current == null && history.length > 0) originT.current = history[0].t ?? now
+    advanceClock()
     const recent = history.filter((e) => now - (e.t ?? now) < WINDOW_MS)
 
     const buildNote = (
@@ -132,11 +150,20 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
       return note
     }
 
+    let lastX = -Infinity
     recent.forEach((e) => {
       const idx = history.indexOf(e)
       const start = e.t ?? now
       const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
       const code = quantize(Math.max(60, end - start) / beatMs).code
+      const k = `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`
+      if (!stamps.current.has(k)) stamps.current.set(k, playMs.current)
+      const stamp = stamps.current.get(k)!
+      if (originStamp.current == null) originStamp.current = stamp
+      const timeX = (stamp - originStamp.current) * ppm()
+      const x = Math.max(timeX, lastX + MIN_GAP)
+      lastX = x
+
       const v = compactVoicing(e.pitches ?? [])
       const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', code)
       const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', code)
@@ -148,38 +175,32 @@ export function ProgressionStaff({ history, useFlats = false, tempo }: Props) {
       tNote.setContext(ctxB)
       bNote.setContext(ctxB)
       tc.preFormat()
-      tc.setX((start - (originT.current ?? start)) * ppm)
+      tc.setX(x)
       tNote.draw()
       bNote.draw()
     })
     const svgB = divB.innerHTML
 
-    const initX =
-      originT.current != null
-        ? rightEdge.current - noteStartX.current - (now - originT.current) * ppm
-        : rightEdge.current - noteStartX.current
     el.innerHTML =
       `<div class="staff-layers">${svgA}` +
-      `<div class="staff-notes" data-notes style="transform:translateX(${initX}px)">${svgB}</div>` +
+      `<div class="staff-notes" data-notes style="transform:translateX(${scrollX()}px)">${svgB}</div>` +
       `</div>`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|'), useFlats, width, tempo])
 
-  // Animation loop: translate the notes layer so notes drift left at tempo.
   useEffect(() => {
     let raf = 0
     const animate = () => {
       raf = requestAnimationFrame(animate)
+      advanceClock()
       const el = ref.current
-      if (!el || originT.current == null) return
+      if (!el) return
       const n = el.querySelector('[data-notes]') as HTMLElement | null
-      if (!n) return
-      const bpm = tempoRef.current && tempoRef.current > 0 ? tempoRef.current : 120
-      const ppm = PX_PER_BEAT / (60000 / bpm)
-      const x = rightEdge.current - noteStartX.current - (Date.now() - originT.current) * ppm
-      n.style.transform = `translateX(${x}px)`
+      if (n) n.style.transform = `translateX(${scrollX()}px)`
     }
     raf = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return <div className="progression-staff" ref={ref} />

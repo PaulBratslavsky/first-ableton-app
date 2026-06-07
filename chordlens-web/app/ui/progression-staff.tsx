@@ -4,16 +4,18 @@ import { pitchClass, compactVoicing } from '../music/music.ts'
 import { pitchColor } from '../music/colors.ts'
 import type { ChordHistoryEntry } from './progression-strip.tsx'
 
-// Continuously-scrolling grand staff. The clef/staff lines are a static layer;
-// the notes are a second layer positioned by absolute time and translated every
-// animation frame so they drift right→left as the song plays (a playhead at the
-// right edge), instead of only jumping when a new note lands.
+// Continuously-scrolling grand staff driven by a "play clock" that only advances
+// while the track is running (Ableton playing / Demo / Web MIDI). Each chord is
+// stamped with that clock when first seen, so pausing freezes the scroll with no
+// jump on resume. A static clef layer sits behind a notes layer that a
+// requestAnimationFrame loop translates by elapsed×pixels-per-beat (track BPM).
 const PAD_RIGHT = 28
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
 const PX_PER_BEAT = 56
-const WINDOW_MS = 90_000 // only render notes from roughly the last ~90s
+const MIN_GAP = 40 // minimum px between consecutive chords so they never overlap
+const WINDOW_MS = 120_000
 
 const STEPS: { beats: number; code: string }[] = [
   { beats: 0.25, code: '16' },
@@ -49,6 +51,8 @@ interface Props {
   history: ChordHistoryEntry[]
   useFlats?: boolean
   tempo?: number | null
+  /** Whether the timeline should advance (Ableton playing / Demo / Web MIDI). */
+  running?: boolean
 }
 
 export function ProgressionStaff(handle: Handle<Props>) {
@@ -59,28 +63,40 @@ export function ProgressionStaff(handle: Handle<Props>) {
   let building = false
   let raf: number | null = null
 
-  // Scroll bookkeeping (set on each rebuild, read by the animation loop).
-  let originT: number | null = null
   let noteStartX = 56
   let rightEdge = 800
 
-  function pxPerMs() {
+  // Play clock: advances only while `running`, so the scroll pauses with the
+  // transport. Notes are stamped with it on first sight.
+  let playMs = 0
+  let lastWall: number | null = null
+  let originStamp: number | null = null
+  let runningFlag = true // mirrors handle.props.running, refreshed each render
+  const stamps = new Map<string, number>()
+
+  function ppm() {
     const { tempo } = handle.props
     const bpm = tempo && tempo > 0 ? tempo : 120
     return PX_PER_BEAT / (60000 / bpm)
   }
 
-  function scrollXNow() {
-    if (originT == null) return rightEdge - noteStartX
-    return rightEdge - noteStartX - (Date.now() - originT) * pxPerMs()
+  function advanceClock() {
+    const wall = Date.now()
+    if (lastWall != null && runningFlag) playMs += wall - lastWall
+    lastWall = wall
   }
 
-  // Animation loop: translate the notes layer so notes drift left over time.
+  function scrollX() {
+    if (originStamp == null) return rightEdge - noteStartX
+    return rightEdge - noteStartX - (playMs - originStamp) * ppm()
+  }
+
   function animate() {
     raf = requestAnimationFrame(animate)
+    advanceClock()
     if (!node) return
     const notes = node.querySelector('[data-notes]') as HTMLElement | null
-    if (notes) notes.style.transform = `translateX(${scrollXNow()}px)`
+    if (notes) notes.style.transform = `translateX(${scrollX()}px)`
   }
 
   async function rebuild(key: string) {
@@ -89,7 +105,6 @@ export function ProgressionStaff(handle: Handle<Props>) {
     const { history, useFlats = false, tempo } = handle.props
     const staveW = Math.max(width - 4, 200)
 
-    // --- static layer: clefs + staff lines + brace ---
     const divA = document.createElement('div')
     const rA = new Renderer(divA, Renderer.Backends.SVG)
     rA.resize(staveW, HEIGHT)
@@ -102,7 +117,6 @@ export function ProgressionStaff(handle: Handle<Props>) {
     new StaveConnector(tA, bA).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctxA).draw()
     const svgA = divA.innerHTML
 
-    // --- notes layer: notes positioned by absolute time (staves not drawn) ---
     const divB = document.createElement('div')
     const rB = new Renderer(divB, Renderer.Backends.SVG)
     rB.resize(staveW, HEIGHT)
@@ -114,9 +128,8 @@ export function ProgressionStaff(handle: Handle<Props>) {
 
     const bpm = tempo && tempo > 0 ? tempo : 120
     const beatMs = 60000 / bpm
-    const ppm = PX_PER_BEAT / beatMs
     const now = Date.now()
-    if (originT == null && history.length > 0) originT = history[0].t ?? now
+    advanceClock() // make sure playMs is current before stamping
     const recent = history.filter((e) => now - (e.t ?? now) < WINDOW_MS)
 
     const buildNote = (pitches: number[], restKey: string, clef: 'treble' | 'bass', code: string) => {
@@ -131,11 +144,20 @@ export function ProgressionStaff(handle: Handle<Props>) {
       return note
     }
 
+    let lastX = -Infinity
     recent.forEach((e) => {
       const idx = history.indexOf(e)
       const start = e.t ?? now
       const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
       const code = quantize(Math.max(60, end - start) / beatMs).code
+      const k = `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`
+      if (!stamps.has(k)) stamps.set(k, playMs)
+      const stamp = stamps.get(k)!
+      if (originStamp == null) originStamp = stamp
+      const timeX = (stamp - originStamp) * ppm()
+      const x = Math.max(timeX, lastX + MIN_GAP)
+      lastX = x
+
       const v = compactVoicing(e.pitches ?? [])
       const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', code)
       const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', code)
@@ -147,26 +169,26 @@ export function ProgressionStaff(handle: Handle<Props>) {
       tNote.setContext(ctxB)
       bNote.setContext(ctxB)
       tc.preFormat()
-      tc.setX((start - (originT ?? start)) * ppm)
+      tc.setX(x)
       tNote.draw()
       bNote.draw()
     })
     const svgB = divB.innerHTML
 
-    const initialX = scrollXNow()
     cachedSvg =
       `<div class="staff-layers">${svgA}` +
-      `<div class="staff-notes" data-notes style="transform:translateX(${initialX}px)">${svgB}</div>` +
+      `<div class="staff-notes" data-notes style="transform:translateX(${scrollX()}px)">${svgB}</div>` +
       `</div>`
     cachedKey = key
     handle.update()
   }
 
   return () => {
-    const { history, tempo } = handle.props
+    const { history, tempo, running } = handle.props
+    runningFlag = running !== false // keep the rAF clock gate in sync with props
     const key =
       history.map((e) => `${(e.pitches ?? []).join(',')}:${e.t ?? 0}`).join('|') +
-      `@${tempo ?? 0}#${width}`
+      `@${tempo ?? 0}#${width}!${running ? 1 : 0}`
     if (key !== cachedKey && typeof document !== 'undefined' && !building) {
       building = true
       rebuild(key)

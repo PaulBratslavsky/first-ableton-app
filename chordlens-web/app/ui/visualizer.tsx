@@ -394,7 +394,12 @@ export const Visualizer = clientEntry(
                   Play a progression — it'll be written out here, chord by chord.
                 </p>
               ) : (
-                <ProgressionStaff history={history} useFlats={useFlats} tempo={tempo} />
+                <ProgressionStaff
+                  history={history}
+                  useFlats={useFlats}
+                  tempo={tempo}
+                  running={demo || webMidiOn || isPlaying}
+                />
               )}
             </div>
           </section>
