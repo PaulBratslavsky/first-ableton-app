@@ -191,6 +191,14 @@ body {
   overflow: hidden;
 }
 .progression-staff svg { display: block; width: 100%; }
+/* Scrolling timeline: static clef layer + a notes layer translated each frame. */
+.staff-layers { position: relative; }
+.staff-notes {
+  position: absolute;
+  inset: 0;
+  will-change: transform; /* promote to its own layer — smooth BPM scroll */
+}
+.staff-notes svg { overflow: visible; } /* let notes render/scroll beyond the viewport */
 
 /* ---- Roman numeral ---- */
 .roman {

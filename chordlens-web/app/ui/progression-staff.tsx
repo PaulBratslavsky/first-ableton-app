@@ -4,15 +4,16 @@ import { pitchClass, compactVoicing } from '../music/music.ts'
 import { pitchColor } from '../music/colors.ts'
 import type { ChordHistoryEntry } from './progression-strip.tsx'
 
-// One continuous grand staff. Each chord sits at x ∝ when it was played
-// (BPM-based) — a playhead writing notes left→right — so the gap between notes
-// is the real time between them. Rendered to an SVG string and applied via the
-// `innerHTML` prop so remix/ui never wipes it (no flicker / layout shift).
-const PAD_RIGHT = 18
+// Continuously-scrolling grand staff. The clef/staff lines are a static layer;
+// the notes are a second layer positioned by absolute time and translated every
+// animation frame so they drift right→left as the song plays (a playhead at the
+// right edge), instead of only jumping when a new note lands.
+const PAD_RIGHT = 28
 const HEIGHT = 224
 const TREBLE_Y = 26
 const BASS_Y = 110
 const PX_PER_BEAT = 56
+const WINDOW_MS = 90_000 // only render notes from roughly the last ~90s
 
 const STEPS: { beats: number; code: string }[] = [
   { beats: 0.25, code: '16' },
@@ -51,33 +52,75 @@ interface Props {
 }
 
 export function ProgressionStaff(handle: Handle<Props>) {
+  let node: HTMLDivElement | null = null
   let width = 900
   let cachedKey = ''
   let cachedSvg = ''
   let building = false
+  let raf: number | null = null
+
+  // Scroll bookkeeping (set on each rebuild, read by the animation loop).
+  let originT: number | null = null
+  let noteStartX = 56
+  let rightEdge = 800
+
+  function pxPerMs() {
+    const { tempo } = handle.props
+    const bpm = tempo && tempo > 0 ? tempo : 120
+    return PX_PER_BEAT / (60000 / bpm)
+  }
+
+  function scrollXNow() {
+    if (originT == null) return rightEdge - noteStartX
+    return rightEdge - noteStartX - (Date.now() - originT) * pxPerMs()
+  }
+
+  // Animation loop: translate the notes layer so notes drift left over time.
+  function animate() {
+    raf = requestAnimationFrame(animate)
+    if (!node) return
+    const notes = node.querySelector('[data-notes]') as HTMLElement | null
+    if (notes) notes.style.transform = `translateX(${scrollXNow()}px)`
+  }
 
   async function rebuild(key: string) {
     const VF = await import('vexflow')
     const { Renderer, Stave, StaveNote, StaveConnector, Accidental, TickContext } = VF
     const { history, useFlats = false, tempo } = handle.props
-
-    const div = document.createElement('div')
     const staveW = Math.max(width - 4, 200)
-    const renderer = new Renderer(div, Renderer.Backends.SVG)
-    renderer.resize(staveW, HEIGHT)
-    const ctx = renderer.getContext()
 
-    const treble = new Stave(2, TREBLE_Y, staveW - 4)
-    treble.addClef('treble').setContext(ctx).draw()
-    const bass = new Stave(2, BASS_Y, staveW - 4)
-    bass.addClef('bass').setContext(ctx).draw()
-    new StaveConnector(treble, bass).setType(StaveConnector.type.BRACE).setContext(ctx).draw()
-    new StaveConnector(treble, bass).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw()
+    // --- static layer: clefs + staff lines + brace ---
+    const divA = document.createElement('div')
+    const rA = new Renderer(divA, Renderer.Backends.SVG)
+    rA.resize(staveW, HEIGHT)
+    const ctxA = rA.getContext()
+    const tA = new Stave(2, TREBLE_Y, staveW - 4)
+    tA.addClef('treble').setContext(ctxA).draw()
+    const bA = new Stave(2, BASS_Y, staveW - 4)
+    bA.addClef('bass').setContext(ctxA).draw()
+    new StaveConnector(tA, bA).setType(StaveConnector.type.BRACE).setContext(ctxA).draw()
+    new StaveConnector(tA, bA).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctxA).draw()
+    const svgA = divA.innerHTML
+
+    // --- notes layer: notes positioned by absolute time (staves not drawn) ---
+    const divB = document.createElement('div')
+    const rB = new Renderer(divB, Renderer.Backends.SVG)
+    rB.resize(staveW, HEIGHT)
+    const ctxB = rB.getContext()
+    const tB = new Stave(2, TREBLE_Y, staveW - 4).setContext(ctxB)
+    const bB = new Stave(2, BASS_Y, staveW - 4).setContext(ctxB)
+    noteStartX = tB.getNoteStartX()
+    rightEdge = staveW - 4 - PAD_RIGHT
+
+    const bpm = tempo && tempo > 0 ? tempo : 120
+    const beatMs = 60000 / bpm
+    const ppm = PX_PER_BEAT / beatMs
+    const now = Date.now()
+    if (originT == null && history.length > 0) originT = history[0].t ?? now
+    const recent = history.filter((e) => now - (e.t ?? now) < WINDOW_MS)
 
     const buildNote = (pitches: number[], restKey: string, clef: 'treble' | 'bass', code: string) => {
-      if (pitches.length === 0) {
-        return new StaveNote({ keys: [restKey], duration: `${code}r`, clef })
-      }
+      if (pitches.length === 0) return new StaveNote({ keys: [restKey], duration: `${code}r`, clef })
       const parts = pitches.map((p) => toVexKey(p, useFlats))
       const note = new StaveNote({ keys: parts.map((p) => p.key), duration: code, clef })
       parts.forEach((p, i) => {
@@ -88,39 +131,33 @@ export function ProgressionStaff(handle: Handle<Props>) {
       return note
     }
 
-    if (history.length > 0) {
-      const bpm = tempo && tempo > 0 ? tempo : 120
-      const beatMs = 60000 / bpm
-      const now = Date.now()
-      const noteStartX = treble.getNoteStartX()
-      const rightX = staveW - 4 - PAD_RIGHT
-      const tEnd = history[history.length - 1].t ?? now
-      const xAbsOf = (t: number) => rightX - ((tEnd - t) / beatMs) * PX_PER_BEAT
-      const visible = history.filter((e) => xAbsOf(e.t ?? now) >= noteStartX)
+    recent.forEach((e) => {
+      const idx = history.indexOf(e)
+      const start = e.t ?? now
+      const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
+      const code = quantize(Math.max(60, end - start) / beatMs).code
+      const v = compactVoicing(e.pitches ?? [])
+      const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', code)
+      const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', code)
+      const tc = new TickContext()
+      tc.addTickable(tNote)
+      tc.addTickable(bNote)
+      tNote.setStave(tB)
+      bNote.setStave(bB)
+      tNote.setContext(ctxB)
+      bNote.setContext(ctxB)
+      tc.preFormat()
+      tc.setX((start - (originT ?? start)) * ppm)
+      tNote.draw()
+      bNote.draw()
+    })
+    const svgB = divB.innerHTML
 
-      visible.forEach((e) => {
-        const idx = history.indexOf(e)
-        const start = e.t ?? now
-        const end = idx + 1 < history.length ? (history[idx + 1].t ?? now) : now
-        const code = quantize(Math.max(60, end - start) / beatMs).code
-        const v = compactVoicing(e.pitches ?? [])
-        const tNote = buildNote(v.filter((p) => p >= CLEF_SPLIT), 'b/4', 'treble', code)
-        const bNote = buildNote(v.filter((p) => p < CLEF_SPLIT), 'd/3', 'bass', code)
-        const tc = new TickContext()
-        tc.addTickable(tNote)
-        tc.addTickable(bNote)
-        tNote.setStave(treble)
-        bNote.setStave(bass)
-        tNote.setContext(ctx)
-        bNote.setContext(ctx)
-        tc.preFormat()
-        tc.setX(Math.max(0, xAbsOf(start) - noteStartX))
-        tNote.draw()
-        bNote.draw()
-      })
-    }
-
-    cachedSvg = div.innerHTML
+    const initialX = scrollXNow()
+    cachedSvg =
+      `<div class="staff-layers">${svgA}` +
+      `<div class="staff-notes" data-notes style="transform:translateX(${initialX}px)">${svgB}</div>` +
+      `</div>`
     cachedKey = key
     handle.update()
   }
@@ -143,6 +180,7 @@ export function ProgressionStaff(handle: Handle<Props>) {
         className="progression-staff"
         innerHTML={cachedSvg}
         mix={ref((n, signal) => {
+          node = n as HTMLDivElement
           const ro = new ResizeObserver((entries) => {
             const w = entries[0]?.contentRect.width
             if (w && w > 0 && Math.round(w) !== width) {
@@ -151,7 +189,11 @@ export function ProgressionStaff(handle: Handle<Props>) {
             }
           })
           ro.observe(n)
-          signal.addEventListener('abort', () => ro.disconnect())
+          if (typeof requestAnimationFrame !== 'undefined') raf = requestAnimationFrame(animate)
+          signal.addEventListener('abort', () => {
+            ro.disconnect()
+            if (raf != null) cancelAnimationFrame(raf)
+          })
         })}
       />
     )
