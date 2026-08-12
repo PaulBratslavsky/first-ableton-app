@@ -98,9 +98,24 @@ describe('voicingsFor — playability invariants', () => {
     }
   })
 
-  it('ranks easiest first', () => {
-    const scores = guitar('C').map((v) => v.score)
-    expect(scores).toEqual([...scores].sort((a, b) => a - b))
+  it('walks up the neck rather than shuffling one hand position', () => {
+    const positions = guitar('C').map((v) => (v.frets.includes(0) ? 0 : v.position))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    // Every entry is a distinct hand position — no eight ways to fret open C.
+    expect(new Set(positions).size).toBe(positions.length)
+  })
+
+  it('offers grips well up the neck, not just at the nut', () => {
+    // The whole point: something to play along with wherever your hand is.
+    for (const symbol of ['C', 'G', 'Am', 'F', 'D']) {
+      const positions = guitar(symbol).map((v) => v.position)
+      expect(Math.max(...positions)).toBeGreaterThanOrEqual(5)
+    }
+  })
+
+  it('leads with a shape at or near the nut', () => {
+    expect(guitar('C')[0].frets).toEqual([-1, 3, 2, 0, 1, 0])
+    expect(guitar('G')[0].frets).toEqual([3, 2, 0, 0, 0, 3])
   })
 
   it('returns distinct shapes', () => {

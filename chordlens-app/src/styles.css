@@ -437,7 +437,49 @@ body {
 .fb-pos-btn:hover:not(:disabled),
 .fb-pos-auto:hover { border-color: var(--accent-dim); color: var(--accent); }
 .fb-pos-btn:disabled { opacity: 0.35; cursor: default; }
-.fb-pos-label { color: var(--muted); min-width: 46px; text-align: center; }
+.fb-pos-label { color: var(--muted); min-width: 72px; text-align: center; }
+.fb-pos-auto:disabled { opacity: 0.35; cursor: default; }
+.fb-pos-auto:disabled:hover { border-color: var(--line); color: var(--text); }
+/* Chord-shape extras: one box per grip, the barre bar, the "skip me" mark. */
+.fb-shape-box {
+  fill: currentColor;
+  fill-opacity: 0.06;
+  stroke: currentColor;
+  stroke-opacity: 0.75;
+  stroke-width: 1.2;
+}
+.fb-shape-label {
+  fill: currentColor;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Adjacent grips overlap on the neck; separate hues keep them apart. */
+.fb-shape--0 { color: #4ade80; }
+.fb-shape--1 { color: #60a5fa; }
+.fb-shape--2 { color: #fbbf24; }
+.fb-chord-name {
+  margin-left: 8px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.fb-barre {
+  fill: #f4f6fb;
+  opacity: 0.22;
+  stroke: #f4f6fb;
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+.fb-mute {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
 .fb-pos-auto--on {
   background: var(--accent-soft);
   border-color: var(--accent);

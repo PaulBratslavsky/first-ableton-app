@@ -26,6 +26,12 @@ const MAX_INNER_MUTES = 2
  */
 const MAX_COMFORTABLE_GAP = 8
 const DEFAULT_LIMIT = 8
+/**
+ * How far apart two offered shapes must sit before they count as different
+ * places to put your hand. Shapes at the 1st and 3rd fret are the same reach;
+ * offering both wastes a slot that a grip up the neck could have used.
+ */
+const MIN_POSITION_GAP = 3
 
 // Scoring weights. Roughly calibrated in "fingers": a barre costs about what an
 // extra finger and a half does, and climbing the neck gets expensive fast —
@@ -51,10 +57,17 @@ const COST_UNISON = 1.5
  * to high across the neck; a crossing is the search finding a technicality.
  */
 const COST_VOICE_CROSSING = 2
-/** Two fingers pinned to one fret on strings a barre can't reach across. */
-const COST_CRAMPED_FRET = 1.5
-/** Charged per fret of reach beyond a relaxed two-fret grip. */
-const COST_PER_STRETCHED_FRET = 0.5
+/**
+ * Two fingers pinned to one fret on strings a barre can't reach across —
+ * something lower rings between them. Costs more than the barre it can't be:
+ * you're holding a barre's shape without being allowed to lay the finger flat.
+ */
+const COST_CRAMPED_FRET = 2.5
+/**
+ * Charged per fret of reach beyond a relaxed two-fret grip. Every standard
+ * shape fits inside two frets of its position; wider means a real stretch.
+ */
+const COST_PER_STRETCHED_FRET = 1
 const BONUS_OPEN_STRING = 0.5
 
 /** Sentinel for a string that isn't played. */
@@ -277,6 +290,47 @@ function evaluate(
 /** Stable identity for a shape, so the same grip found at two anchors dedupes. */
 const shapeKey = (frets: number[]) => frets.join(',')
 
+const soundingCount = (v: Voicing) => v.frets.filter((f) => f >= 0).length
+
+/**
+ * Which hand position a shape belongs to. Anything ringing an open string is
+ * played at the nut whatever fret it stops, so all open grips share a slot.
+ */
+const positionSlot = (v: Voicing) => (v.frets.includes(0) ? 0 : v.position)
+
+/** Easiest first, then fuller, then lower — a total order, so ties are stable. */
+function byPlayability(a: Voicing, b: Voicing): number {
+  return (
+    a.score - b.score ||
+    soundingCount(b) - soundingCount(a) ||
+    a.position - b.position
+  )
+}
+
+/**
+ * Keep the best shape in each hand position and hand them back in neck order.
+ *
+ * The raw ranking clusters badly: the eight best C shapes are eight ways to
+ * fret the same open chord, one finger added or dropped. Someone flipping
+ * through shapes to play along wants the opposite — the best grip at the nut,
+ * the best around the 3rd fret, the best at the 8th — so the arrows walk up
+ * the neck and the barre shapes actually surface.
+ */
+function spreadAcrossNeck(ranked: Voicing[], limit: number): Voicing[] {
+  const chosen: Voicing[] = []
+  // Walk best-first and take a shape only if it's a real move for the hand.
+  for (const voicing of ranked) {
+    const slot = positionSlot(voicing)
+    const crowded = chosen.some(
+      (taken) => Math.abs(positionSlot(taken) - slot) < MIN_POSITION_GAP,
+    )
+    if (crowded) continue
+    chosen.push(voicing)
+    if (chosen.length === limit) break
+  }
+  return chosen.sort((a, b) => positionSlot(a) - positionSlot(b))
+}
+
 const cache = new Map<string, Voicing[]>()
 
 /**
@@ -299,7 +353,7 @@ export function voicingsFor(
 ): Voicing[] {
   const cacheKey = `${symbol}|${tuning.join(',')}|${fretCount}`
   const cached = cache.get(cacheKey)
-  if (cached) return cached.slice(0, limit)
+  if (cached) return spreadAcrossNeck(cached, limit)
 
   const spec = parseChord(symbol)
   if (!spec) {
@@ -340,7 +394,7 @@ export function voicingsFor(
     walk(0, 0)
   }
 
-  const ranked = [...found.values()].sort((a, b) => a.score - b.score)
+  const ranked = [...found.values()].sort(byPlayability)
   cache.set(cacheKey, ranked)
-  return ranked.slice(0, limit)
+  return spreadAcrossNeck(ranked, limit)
 }

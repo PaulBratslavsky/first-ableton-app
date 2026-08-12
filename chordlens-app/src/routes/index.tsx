@@ -233,6 +233,7 @@ function Visualizer() {
             keyPcs={keyPcs}
             scaleGuide={scaleGuide}
             useFlats={useFlats}
+            chordSymbol={chord?.chordSymbol ?? null}
           />
         </div>
         <div className="panel">
