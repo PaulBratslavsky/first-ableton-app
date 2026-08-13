@@ -48,6 +48,13 @@ interface Props {
    * a pure note map (the bass has no use for chord grips).
    */
   chordSymbol?: string | null
+  /**
+   * Name every position on the neck, not just the lit ones. Always spelled
+   * with sharps — the overlay is a fixed map of the neck, not a reading of the
+   * current key.
+   */
+  showNames?: boolean
+  onToggleNames?: () => void
 }
 
 export function FretboardView({
@@ -59,6 +66,8 @@ export function FretboardView({
   scaleGuide,
   useFlats = false,
   chordSymbol,
+  showNames = false,
+  onToggleNames,
 }: Props) {
   const strings = tuning.length
   const nutX = LABEL_W + OPEN_W
@@ -240,6 +249,16 @@ export function FretboardView({
           >
             1×
           </button>
+          {onToggleNames && (
+            <button
+              type="button"
+              className={`fb-pos-auto${showNames ? ' fb-pos-auto--on' : ''}`}
+              onClick={onToggleNames}
+              title="Name every note on the neck"
+            >
+              Names
+            </button>
+          )}
         </span>
       </figcaption>
       <svg
@@ -368,8 +387,29 @@ export function FretboardView({
             ),
         )}
 
+        {/* Every note on the neck, named. Drawn under the dots so a lit note
+            keeps its own label. */}
+        {showNames &&
+          tuning.flatMap((open, string) =>
+            Array.from({ length: fretCount + 1 }, (_, fret) => {
+              // The scale guide's dots would sit behind these labels, so the
+              // key is carried by the lettering instead.
+              const inKey = scaleGuide?.has(pitchClass(open + fret)) ?? false
+              return (
+                <text
+                  key={`name-${string}-${fret}`}
+                  x={fretCenterX(fret)}
+                  y={stringY(string)}
+                  className={`fb-name${inKey ? ' fb-name--in-key' : ''}`}
+                >
+                  {noteName(open + fret).replace(/[0-9]/g, '')}
+                </text>
+              )
+            }),
+          )}
+
         {/* Faint scale guide within the position (noise next to a chord shape). */}
-        {!chordActive && scaleDots.map(({ string, fret }) => (
+        {!chordActive && !showNames && scaleDots.map(({ string, fret }) => (
           <circle
             key={`scale-${string}-${fret}`}
             cx={fretCenterX(fret)}

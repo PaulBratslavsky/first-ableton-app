@@ -105,6 +105,20 @@ function Visualizer() {
   const rootPc = key ? tonicPc(key) : null
   const [showScale, setShowScale] = useState(true)
   const [showPush, setShowPush] = useState(true)
+
+  // Note-name overlays, toggled per view — you rarely want all four at once.
+  const [names, setNames] = useState({
+    piano: false,
+    guitar: false,
+    bass: false,
+    push: false,
+  })
+  const toggleNames = useCallback(
+    (view: keyof typeof names) => () =>
+      setNames((prev) => ({ ...prev, [view]: !prev[view] })),
+    [],
+  )
+
   const scaleGuide = showScale ? keyPcs : null
 
   const chord = detectChord(displayPitches, useFlats)
@@ -208,13 +222,28 @@ function Visualizer() {
       {/* Piano — the hero view. */}
       <section className="panel panel--hero">
         <div className="view-title view-title--row">
-          <span>Piano{frozen ? ' · pinned' : ''}</span>
+          <span className="view-title-lead">
+            Piano{frozen ? ' · pinned' : ''}
+            <button
+              type="button"
+              className={`fb-pos-auto${names.piano ? ' fb-pos-auto--on' : ''}`}
+              onClick={toggleNames('piano')}
+              title="Name every key"
+            >
+              Names
+            </button>
+          </span>
           <span className="now-playing">
             {nowPlaying}
             {roman && <span className="roman">{roman}</span>}
           </span>
         </div>
-        <PianoView heldNotes={displayNotes} keyPcs={keyPcs} scaleGuide={scaleGuide} />
+        <PianoView
+          heldNotes={displayNotes}
+          keyPcs={keyPcs}
+          scaleGuide={scaleGuide}
+          showNames={names.piano}
+        />
         {/* Always rendered (hidden while playing) so the panel never resizes. */}
         <p className="idle-hint" style={{ visibility: isIdle ? 'visible' : 'hidden' }}>
           {status === 'no-input' && !live.connected
@@ -234,6 +263,8 @@ function Visualizer() {
             scaleGuide={scaleGuide}
             useFlats={useFlats}
             chordSymbol={chord?.chordSymbol ?? null}
+            showNames={names.guitar}
+            onToggleNames={toggleNames('guitar')}
           />
         </div>
         <div className="panel">
@@ -245,14 +276,33 @@ function Visualizer() {
             keyPcs={keyPcs}
             scaleGuide={scaleGuide}
             useFlats={useFlats}
+            showNames={names.bass}
+            onToggleNames={toggleNames('bass')}
           />
         </div>
       </section>
 
       {showPush && (
         <section className="panel panel--sheet">
-          <div className="view-title">Push · chromatic</div>
-          <PushView heldNotes={displayNotes} scalePcs={keyPcs} rootPc={rootPc} />
+          <div className="view-title view-title--row">
+            <span className="view-title-lead">
+              Push · chromatic
+              <button
+                type="button"
+                className={`fb-pos-auto${names.push ? ' fb-pos-auto--on' : ''}`}
+                onClick={toggleNames('push')}
+                title="Name every pad"
+              >
+                Names
+              </button>
+            </span>
+          </div>
+          <PushView
+            heldNotes={displayNotes}
+            scalePcs={keyPcs}
+            rootPc={rootPc}
+            showNames={names.push}
+          />
         </section>
       )}
 

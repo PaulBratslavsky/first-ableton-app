@@ -42,9 +42,19 @@ interface Props {
   keyPcs?: Set<number> | null
   /** When set, faintly mark in-scale keys that aren't currently held. */
   scaleGuide?: Set<number> | null
+  /**
+   * Name every key, not just the Cs. Always spelled with sharps — the overlay
+   * is a fixed map of the keyboard, not a reading of the current key.
+   */
+  showNames?: boolean
 }
 
-export function PianoView({ heldNotes, keyPcs, scaleGuide }: Props) {
+export function PianoView({
+  heldNotes,
+  keyPcs,
+  scaleGuide,
+  showNames = false,
+}: Props) {
   const outside = (pitch: number) =>
     keyPcs != null && !keyPcs.has(pitchClass(pitch))
   const inScale = (pitch: number) =>
@@ -86,9 +96,15 @@ export function PianoView({ heldNotes, keyPcs, scaleGuide }: Props) {
                 style={{ fill: pitchColor(k.pitch) }}
               />
             )}
-            {isC && (
-              <text x={k.x + WHITE_W / 2} y={WHITE_H - 8} className="key-label">
-                {noteName(k.pitch)}
+            {(isC || showNames) && (
+              <text
+                x={k.x + WHITE_W / 2}
+                y={WHITE_H - 8}
+                className={`key-label${held ? ' key-label--on-held' : ''}`}
+              >
+                {showNames && !isC
+                  ? noteName(k.pitch).replace(/[0-9]/g, '')
+                  : noteName(k.pitch)}
               </text>
             )}
           </g>
@@ -111,7 +127,7 @@ export function PianoView({ heldNotes, keyPcs, scaleGuide }: Props) {
               }`}
               style={held ? { fill: pitchColor(k.pitch) } : undefined}
             />
-            {inScale(k.pitch) && (
+            {inScale(k.pitch) && !showNames && (
               <circle
                 cx={k.x + BLACK_W / 2}
                 cy={BLACK_H - 12}
@@ -119,6 +135,17 @@ export function PianoView({ heldNotes, keyPcs, scaleGuide }: Props) {
                 className="key-scale-dot"
                 style={{ fill: pitchColor(k.pitch) }}
               />
+            )}
+            {showNames && (
+              <text
+                x={k.x + BLACK_W / 2}
+                y={BLACK_H - 9}
+                className={`key-label key-label--black${
+                  held ? ' key-label--on-held' : ''
+                }`}
+              >
+                {noteName(k.pitch).replace(/[0-9]/g, '')}
+              </text>
             )}
           </g>
         )
