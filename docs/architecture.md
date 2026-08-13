@@ -268,6 +268,10 @@ sequenceDiagram
   alone, or the app would get one copy per device.
 - **Failover.** Losing the hub connection puts a satellite back into the
   election after ~2s; whichever grabs the port becomes the new hub.
+- **Deploying an edit.** Live loads the scripts from *its own copy* of the
+  device in the User Library, not from this repo, so editing them here has no
+  effect until `max-for-live/install-device.sh` copies them across
+  (`--check` reports drift). The device watches its scripts and reloads itself.
 - **Testing.** `max-for-live/test/` runs two real bridges as forked processes
   with `max-api` stubbed (it exists only inside Node-for-Max), covering
   election, relaying, deduplication and failover — the behaviour that can't be

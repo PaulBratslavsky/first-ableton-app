@@ -155,8 +155,10 @@ function toLive(obj) {
   Max.outlet('cmd', JSON.stringify(obj));
 }
 
+/** Tracks in Live's own order, so the app's picker doesn't shuffle. */
 function trackRoster() {
-  return { type: 'tracks', tracks: Array.from(knownTracks.values()) };
+  const tracks = Array.from(knownTracks.values()).sort((a, b) => a.index - b.index);
+  return { type: 'tracks', tracks: tracks };
 }
 
 /** Record a track we're now hearing from, and tell the app if it's new. */
@@ -450,6 +452,24 @@ Max.addHandler('fromlive', (jsonStr) => {
   if (obj.type === 'transport') lastTransport = obj;
   broadcast(obj);
 });
+
+/**
+ * Ask the v8 object which track we're on, until it tells us.
+ *
+ * Track identity can't wait on `live.thisdevice`: it bangs once when the device
+ * is instantiated, so a script reloaded in place never sees one, and a
+ * satellite — which no app client ever connects to — would otherwise have
+ * nothing to prompt it. Load order between the two scripts isn't guaranteed
+ * either, hence retrying rather than asking once.
+ */
+const identify = setInterval(() => {
+  if (myTrack) {
+    clearInterval(identify);
+    return;
+  }
+  toLive({ type: 'get_device' });
+}, 1500);
+toLive({ type: 'get_device' });
 
 // Never let a stray error take the server (and the bridge) down.
 process.on('uncaughtException', (err) => {

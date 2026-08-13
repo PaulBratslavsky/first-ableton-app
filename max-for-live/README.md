@@ -72,12 +72,37 @@ patch is self-contained, so paste it in one shot:
 > Ignore any `crash recovery: patcher no longer exists …` lines — that's unrelated
 > Max housekeeping about its own demo patches.
 
+## After you edit a script: `./install-device.sh`
+
+The `.amxd` loads `chordlens.server.js` / `chordlens.v8.js` by bare filename,
+resolved next to the device itself. The moment you drag the device into Live,
+Ableton copies it into your **User Library** — and from then on Live reads *those*
+copies, not the ones in this repo. Editing here changes nothing in Live, silently.
+
+```bash
+./install-device.sh          # copy the scripts to every install found
+./install-device.sh --check  # report drift, change nothing (exit 1 if stale)
+```
+
+The device watches its scripts (`@watch 1` on `node.script`, `autowatch = 1` in
+`v8`), so it reloads on its own — the Max console should print
+`ChordLens hub listening on ws://127.0.0.1:17999 (track N: Name)`.
+
+Set `ABLETON_USER_LIBRARY` if yours isn't at `~/Music/Ableton/User Library`.
+
+If the console still shows the old `ChordLens WebSocket listening …` line, the
+scripts didn't reload — remove and re-add the device, or reopen the set.
+
 ## Freeze it (recommended for a portable device)
 
 Freezing bundles the two `.js` files **into** the `.amxd`, so it works from any
 location and Ableton's habit of copying devices can't separate it from its
 scripts. Because it's dependency-free, freezing is trivial — there's no
 `node_modules` to bundle.
+
+Freeze for distribution, not while developing: a frozen device ignores the
+scripts on disk entirely, so `install-device.sh` can't reach it and edits need an
+unfreeze/re-freeze round trip.
 
 1. In the Max editor, click the **❄️ snowflake "Freeze Device"** button in the
    toolbar.

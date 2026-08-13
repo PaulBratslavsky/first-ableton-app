@@ -98,7 +98,7 @@ function trackIdentity() {
  * Tell node.script which track this device is on, and keep watching that
  * track's name so a rename shows up in the app.
  */
-function pushTrack() {
+function pushTrack(force) {
   var track;
   try {
     track = trackIdentity();
@@ -111,7 +111,7 @@ function pushTrack() {
   var changed =
     !lastTrack || lastTrack.index !== track.index || lastTrack.name !== track.name;
   lastTrack = track;
-  if (changed) emit({ type: 'device', track: track });
+  if (changed || force) emit({ type: 'device', track: track });
 
   // Re-point the name observer whenever the track index moves under us.
   try {
@@ -203,6 +203,15 @@ function dispatch(msg) {
     switch (msg.type) {
       case 'get_session':
         reply(id, sessionInfo());
+        break;
+
+      /**
+       * Which track am I on? node.script asks for this on startup rather than
+       * waiting for `live.thisdevice`, which bangs only at instantiation — a
+       * script reloaded in place (autowatch, @watch) never sees one.
+       */
+      case 'get_device':
+        pushTrack(true);
         break;
 
       case 'set_tempo':
