@@ -278,8 +278,8 @@ sequenceDiagram
   eyeballed inside Ableton. `npm test` in that folder.
 
 On the app side, notes are kept per track (`applyNote` / `heldFor` in
-`lib/ableton.ts`), and the header grows a **`TrackPicker`** once a second device
-appears: follow one track, or fold them all into one chord.
+`lib/ableton.ts`), and a **`TrackTabs`** bar appears above the views once a
+second device shows up: follow one track, or fold them all into one chord.
 
 ### Path B — AbletonMCP socket (LLM / scripting)
 
@@ -373,7 +373,7 @@ first-ableton-app/
 │     └─ components/
 │        ├─ AbletonStatus.tsx     # header chip: connection + tempo + transport
 │        ├─ StatusIndicator.tsx   # MIDI input status
-│        ├─ TrackPicker.tsx       # which Ableton track the views follow
+│        ├─ TrackTabs.tsx         # which Ableton track the views follow
 │        └─ {Piano,Fretboard,Push,Notation}View.tsx, …
 ├─ max-for-live/                  # the Ableton-side device (Path A)
 │  ├─ ChordLens.maxpat            # patch wiring (assemble → ChordLens.amxd)
@@ -433,4 +433,4 @@ To run the full system:
    `npm run dev` (browser; WebSocket bridge + demo only).
 4. The `AbletonStatus` chip connects automatically; play into the device or a
    selected MIDI input and the views light up. With devices on more than one
-   track, the header's track picker chooses which one the views follow.
+   track, the tab bar above the views chooses which one they follow.

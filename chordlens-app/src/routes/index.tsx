@@ -8,7 +8,7 @@ import { StatusIndicator } from '../components/StatusIndicator'
 import { AbletonStatus } from '../components/AbletonStatus'
 import { InputPicker } from '../components/InputPicker'
 import { KeyBadge } from '../components/KeyBadge'
-import { TrackPicker } from '../components/TrackPicker'
+import { TrackTabs } from '../components/TrackTabs'
 import { ProgressionStrip } from '../components/ProgressionStrip'
 import { ProgressionStaff } from '../components/ProgressionStaff'
 import { PianoView } from '../components/PianoView'
@@ -166,12 +166,6 @@ function Visualizer() {
               onRefresh={refreshInputs}
             />
           )}
-          <TrackPicker
-            tracks={live.tracks}
-            value={live.trackFilter}
-            onPick={live.setTrackFilter}
-            playing={soundingTracks}
-          />
           <KeyBadge
             value={key}
             isAuto={isAuto}
@@ -214,7 +208,17 @@ function Visualizer() {
         </div>
       </header>
 
-      <ProgressionStrip history={history} onClear={clear} />
+      {/* Which Ableton track everything below is showing. */}
+      <TrackTabs
+        tracks={live.tracks}
+        value={live.trackFilter}
+        onPick={live.setTrackFilter}
+        playing={soundingTracks}
+        controls="views"
+      />
+
+      <div id="views">
+        <ProgressionStrip history={history} onClear={clear} />
 
       {/* Continuous notation sheet of the whole progression, above the piano. */}
       <section className="panel panel--sheet">
@@ -322,9 +326,10 @@ function Visualizer() {
         </section>
       )}
 
-      <section className="panel panel--notation">
-        <NotationView heldNotes={displayNotes} useFlats={useFlats} />
-      </section>
+        <section className="panel panel--notation">
+          <NotationView heldNotes={displayNotes} useFlats={useFlats} />
+        </section>
+      </div>
     </main>
   )
 }

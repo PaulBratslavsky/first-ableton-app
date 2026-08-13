@@ -70,6 +70,7 @@ body {
 }
 .input-picker-label,
 .key-badge-label,
+.track-picker-label,
 .status-label {
   white-space: nowrap;
 }
@@ -107,10 +108,54 @@ body {
 }
 .pin-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
 .pin-btn:disabled { opacity: 0.45; cursor: default; }
-/* Track picker: one button per track with a ChordLens device on it. */
-.track-picker { display: inline-flex; align-items: center; gap: 4px; }
-/* A track that's sounding right now, whether or not it's the one being watched. */
-.pin-btn--sounding { border-color: var(--accent-dim); }
+/* ---- Track tabs ---- */
+/* Which Ableton track everything below is showing. Only one can be active, so
+   it's a tab bar rather than a row of toggles that all look switched on. */
+.track-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.track-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* sit the underline on the bar's own border */
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.track-tab:hover { color: var(--text); background: var(--panel); }
+.track-tab--on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--panel);
+}
+.track-tab:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: -2px; }
+/*
+ * Whether a track is sounding is a different question from whether you're
+ * watching it, so it gets its own mark. Colouring the border for both made
+ * every button look selected.
+ */
+.track-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+  transition: background 90ms linear;
+}
+.track-dot--on { background: var(--accent); }
 .pin-btn--active {
   background: var(--accent-soft);
   border-color: var(--accent);

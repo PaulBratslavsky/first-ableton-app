@@ -137,8 +137,8 @@ they all want the same port, so they elect roles:
   their own track's notes through it.
 
 So the app keeps one connection but sees every track, with each note stamped with
-the track that played it (the header grows a track picker once a second device
-appears). Remove the hub's device and the port frees up; whichever satellite
+the track that played it (a track tab bar appears above the views once a second
+device shows up). Remove the hub's device and the port frees up; whichever satellite
 notices first — within a couple of seconds — takes over.
 
 Song-wide state (transport, tempo, key, session) is reported by the hub alone, so
