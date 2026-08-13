@@ -53,8 +53,16 @@ let lastTransport = null;
 let role = 'starting';
 /** This device's own track, from the v8 Live API bridge. */
 let myTrack = null;
-/** Every track feeding this hub — ours plus the satellites'. Keyed by index. */
-const knownTracks = new Map();
+/**
+ * The track each device reports, keyed by the device — `SELF` for our own, the
+ * satellite's socket for the others.
+ *
+ * Keyed by device rather than by track index on purpose: a device's index moves
+ * whenever tracks are added, deleted or reordered in Live, and keying by index
+ * would leave the old number in the roster forever. One device, one slot.
+ */
+const trackByDevice = new Map();
+const SELF = Symbol('this device');
 /** A satellite's connection to the hub. */
 let hubSocket = null;
 let reelectTimer = null;
@@ -157,16 +165,26 @@ function toLive(obj) {
 
 /** Tracks in Live's own order, so the app's picker doesn't shuffle. */
 function trackRoster() {
-  const tracks = Array.from(knownTracks.values()).sort((a, b) => a.index - b.index);
+  // Two devices can sit on one track; the app wants the track listed once.
+  const byIndex = new Map();
+  for (const track of trackByDevice.values()) {
+    if (track) byIndex.set(track.index, track);
+  }
+  const tracks = Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
   return { type: 'tracks', tracks: tracks };
 }
 
-/** Record a track we're now hearing from, and tell the app if it's new. */
-function noteTrack(track) {
+/** Record where a device now sits, and tell the app if anything moved. */
+function setDeviceTrack(device, track) {
   if (!track || typeof track.index !== 'number') return;
-  const known = knownTracks.get(track.index);
-  if (known && known.name === track.name) return;
-  knownTracks.set(track.index, track);
+  const known = trackByDevice.get(device);
+  if (known && known.index === track.index && known.name === track.name) return;
+  trackByDevice.set(device, track);
+  if (role === 'hub') broadcast(trackRoster());
+}
+
+function forgetDevice(device) {
+  if (!trackByDevice.delete(device)) return;
   if (role === 'hub') broadcast(trackRoster());
 }
 
@@ -197,7 +215,7 @@ server.on('upgrade', (req, socket) => {
 
 server.on('listening', () => {
   role = 'hub';
-  if (myTrack) knownTracks.set(myTrack.index, myTrack);
+  if (myTrack) trackByDevice.set(SELF, myTrack);
   Max.post(
     `ChordLens hub listening on ws://127.0.0.1:${PORT}` +
       (myTrack ? ` (track ${myTrack.index}: ${myTrack.name})` : ''),
@@ -243,14 +261,20 @@ function onConnect(socket) {
       handleFrame(socket, frame);
     }
   });
-  socket.on('close', () => {
+  /**
+   * Clean up once, however the connection ends. An upgraded HTTP socket is left
+   * half-open when the peer disappears: `end` fires but `close` never does,
+   * because nothing closes our side. So listen for all three and destroy the
+   * socket ourselves.
+   */
+  const gone = () => {
     clients.delete(socket);
-    if (socket.satelliteTrack != null) {
-      knownTracks.delete(socket.satelliteTrack);
-      broadcast(trackRoster());
-    }
-  });
-  socket.on('error', () => clients.delete(socket));
+    forgetDevice(socket);
+    socket.destroy();
+  };
+  socket.on('close', gone);
+  socket.on('end', gone);
+  socket.on('error', gone);
 }
 
 function handleFrame(socket, frame) {
@@ -293,10 +317,7 @@ function handleFrame(socket, frame) {
   // A satellite device announcing itself, then feeding us its track's notes.
   if (msg.type === 'device') {
     socket.isSatellite = true;
-    if (msg.track && typeof msg.track.index === 'number') {
-      socket.satelliteTrack = msg.track.index;
-    }
-    noteTrack(msg.track);
+    setDeviceTrack(socket, msg.track);
     return;
   }
   if (msg.type === 'note') {
@@ -396,7 +417,9 @@ function scheduleReelection() {
 const keepAlive = setInterval(() => {
   for (const s of clients) {
     if (s.isAlive === false) {
+      // A satellite that stopped answering takes its track out of the roster.
       clients.delete(s);
+      forgetDevice(s);
       try {
         s.destroy();
       } catch (e) {
@@ -440,7 +463,7 @@ Max.addHandler('fromlive', (jsonStr) => {
   // the hub's roster (which is the only track list the app is told about).
   if (obj.type === 'device') {
     myTrack = obj.track;
-    noteTrack(myTrack);
+    setDeviceTrack(SELF, myTrack);
     if (role === 'satellite') sendText(hubSocket, JSON.stringify(obj), true);
     return;
   }

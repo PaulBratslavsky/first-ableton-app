@@ -140,6 +140,77 @@ describe('two devices, one port', () => {
     );
   });
 
+  test('a device that moves to another track replaces its roster entry', async () => {
+    // Adding, deleting or reordering tracks in Live renumbers them, so a device
+    // re-reports itself under a new index. Keying the roster by index left the
+    // old number behind, and the picker filled up with ghosts of one device.
+    const a = track(startDevice());
+    await until(() => a.said('hub listening'), 5000, 'hub election');
+    const b = track(startDevice());
+    await until(() => b.said('satellite'), 5000, 'satellite election');
+
+    const app = await connectApp();
+    apps.push(app);
+
+    a.announceTrack(6, 'Chords');
+    b.announceTrack(1, 'Bass');
+    await until(
+      () => app.of('tracks').find((m) => m.tracks.length === 2),
+      5000,
+      'both devices in the roster',
+    );
+
+    // Someone deletes the tracks above them; both slide down the set.
+    a.announceTrack(2, 'Chords');
+    b.announceTrack(0, 'Bass');
+    await until(
+      () =>
+        app
+          .of('tracks')
+          .slice(-1)
+          .find((m) => m.tracks.length === 2 && m.tracks[0].index === 0),
+      5000,
+      'roster to follow the move',
+    );
+
+    const latest = app.of('tracks').at(-1).tracks;
+    assert.strictEqual(latest.length, 2, `stale entries left behind: ${JSON.stringify(latest)}`);
+    assert.deepStrictEqual(
+      latest.map((t) => [t.index, t.name]),
+      [
+        [0, 'Bass'],
+        [2, 'Chords'],
+      ],
+    );
+  });
+
+  test('a departing satellite drops out of the roster', async () => {
+    const a = track(startDevice());
+    await until(() => a.said('hub listening'), 5000, 'hub election');
+    a.announceTrack(0, 'Keys');
+    const b = track(startDevice());
+    await until(() => b.said('satellite'), 5000, 'satellite election');
+    b.announceTrack(3, 'Bass');
+
+    const app = await connectApp();
+    apps.push(app);
+    await until(
+      () => app.of('tracks').find((m) => m.tracks.length === 2),
+      5000,
+      'both tracks',
+    );
+
+    devices = devices.filter((d) => d !== b);
+    await b.stop();
+
+    const shrunk = await until(
+      () => app.of('tracks').at(-1)?.tracks.length === 1 && app.of('tracks').at(-1),
+      5000,
+      'roster to shrink',
+    );
+    assert.deepStrictEqual(shrunk.tracks.map((t) => t.name), ['Keys']);
+  });
+
   test('song state is reported once, not once per device', async () => {
     const a = track(startDevice());
     await until(() => a.said('hub listening'), 5000, 'hub election');
