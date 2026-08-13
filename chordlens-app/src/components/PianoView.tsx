@@ -10,6 +10,11 @@ const BLACK_H = 95
 
 const BLACK_PCS = new Set([1, 3, 6, 8, 10]) // C# D# F# G# A#
 
+/** Scale-guide dots. Sized to read across the whole keyboard; the black-key
+ *  one is smaller only because the key it sits on is narrower. */
+const SCALE_DOT_R = 5
+const BLACK_SCALE_DOT_R = 4.5
+
 interface Key {
   pitch: number
   x: number
@@ -91,7 +96,7 @@ export function PianoView({
               <circle
                 cx={k.x + WHITE_W / 2}
                 cy={WHITE_H - 24}
-                r={3.2}
+                r={SCALE_DOT_R}
                 className="key-scale-dot"
                 style={{ fill: pitchColor(k.pitch) }}
               />
@@ -131,7 +136,7 @@ export function PianoView({
               <circle
                 cx={k.x + BLACK_W / 2}
                 cy={BLACK_H - 12}
-                r={3}
+                r={BLACK_SCALE_DOT_R}
                 className="key-scale-dot"
                 style={{ fill: pitchColor(k.pitch) }}
               />

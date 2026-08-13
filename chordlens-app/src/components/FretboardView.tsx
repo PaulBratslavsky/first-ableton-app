@@ -18,6 +18,9 @@ const FRET_W = 40
 const STRING_GAP = 26
 const PAD_Y = 22
 const DOT_R = 9
+/** Scale-guide dot. Big enough to trace the shape at a glance, small enough
+ *  that a played note still reads as the louder mark. */
+const SCALE_DOT_R = 5.5
 
 // Frets shown per position box (a hand span). base..base+SPAN inclusive.
 const SPAN = 4
@@ -428,7 +431,7 @@ export function FretboardView({
             key={`scale-${string}-${fret}`}
             cx={fretCenterX(fret)}
             cy={stringY(string)}
-            r={3.2}
+            r={SCALE_DOT_R}
             className="fb-scale-dot"
             style={{ fill: pitchColor(tuning[string] + fret) }}
           />
