@@ -41,6 +41,24 @@ describe('SectionHead', () => {
     )
     expect(screen.getByRole('button', { name: 'Names' })).toBeTruthy()
   })
+
+  it('puts `actions` beside the title, out of the right-hand slot', () => {
+    // The piano's now-playing readout is positioned at the right edge and out
+    // of flow, so a right-aligned control lands underneath it.
+    const { container } = render(
+      <SectionHead
+        title="Piano"
+        open
+        onToggle={vi.fn()}
+        actions={<button type="button">Names</button>}
+      >
+        <span className="now-playing">Bbm</span>
+      </SectionHead>,
+    )
+    const lead = container.querySelector('.section-lead')!
+    expect(lead.contains(screen.getByRole('button', { name: 'Names' }))).toBe(true)
+    expect(lead.querySelector('.now-playing')).toBeNull()
+  })
 })
 
 describe('collapsing a view', () => {

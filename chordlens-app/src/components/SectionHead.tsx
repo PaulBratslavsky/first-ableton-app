@@ -9,6 +9,13 @@ interface Props {
   onToggle?: () => void
   /** Id of the region being collapsed, for assistive tech. */
   controls?: string
+  /**
+   * Controls that sit immediately after the title. Use this rather than
+   * `children` when the far right of the row is already spoken for — the
+   * piano's now-playing readout is positioned there and out of flow, so
+   * anything right-aligned lands underneath it.
+   */
+  actions?: ReactNode
   /** This section's own controls, laid out to the right of the title. */
   children?: ReactNode
 }
@@ -20,33 +27,43 @@ interface Props {
  * Collapsing is per-section rather than one global switch — with six views
  * stacked up, which ones you want on screen depends on what you're playing.
  */
-export function SectionHead({ title, open = true, onToggle, controls, children }: Props) {
+export function SectionHead({
+  title,
+  open = true,
+  onToggle,
+  controls,
+  actions,
+  children,
+}: Props) {
   return (
     <div
       className={`view-title view-title--row${
         onToggle && !open ? ' view-title--collapsed' : ''
       }`}
     >
-      {onToggle ? (
-        <button
-          type="button"
-          className="section-toggle"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-controls={controls}
-          title={open ? 'Hide this view' : 'Show this view'}
-        >
-          <span
-            className={`section-chevron${open ? '' : ' section-chevron--closed'}`}
-            aria-hidden="true"
+      <span className="section-lead">
+        {onToggle ? (
+          <button
+            type="button"
+            className="section-toggle"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-controls={controls}
+            title={open ? 'Hide this view' : 'Show this view'}
           >
-            ▾
-          </span>
-          {title}
-        </button>
-      ) : (
-        <span>{title}</span>
-      )}
+            <span
+              className={`section-chevron${open ? '' : ' section-chevron--closed'}`}
+              aria-hidden="true"
+            >
+              ▾
+            </span>
+            {title}
+          </button>
+        ) : (
+          <span>{title}</span>
+        )}
+        {actions}
+      </span>
       {children}
     </div>
   )

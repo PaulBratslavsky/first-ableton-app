@@ -261,15 +261,17 @@ function Visualizer() {
           open={open.piano}
           onToggle={toggleSection('piano')}
           controls="piano-body"
+          actions={
+            <button
+              type="button"
+              className={`fb-pos-auto${names.piano ? ' fb-pos-auto--on' : ''}`}
+              onClick={toggleNames('piano')}
+              title="Name every key"
+            >
+              Names
+            </button>
+          }
         >
-          <button
-            type="button"
-            className={`fb-pos-auto${names.piano ? ' fb-pos-auto--on' : ''}`}
-            onClick={toggleNames('piano')}
-            title="Name every key"
-          >
-            Names
-          </button>
           <span className="now-playing">
             {nowPlaying}
             {roman && <span className="roman">{roman}</span>}
@@ -336,16 +338,17 @@ function Visualizer() {
             open={open.push}
             onToggle={toggleSection('push')}
             controls="push-body"
-          >
-            <button
-              type="button"
-              className={`fb-pos-auto${names.push ? ' fb-pos-auto--on' : ''}`}
-              onClick={toggleNames('push')}
-              title="Name every pad"
-            >
-              Names
-            </button>
-          </SectionHead>
+            actions={
+              <button
+                type="button"
+                className={`fb-pos-auto${names.push ? ' fb-pos-auto--on' : ''}`}
+                onClick={toggleNames('push')}
+                title="Name every pad"
+              >
+                Names
+              </button>
+            }
+          />
           {open.push && (
             <div id="push-body">
               <PushView

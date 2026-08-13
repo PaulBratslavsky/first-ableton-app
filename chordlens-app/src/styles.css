@@ -381,6 +381,13 @@ body {
   color: var(--muted);
   margin-bottom: 12px;
 }
+/* Title, its collapse control, and any controls that belong beside it. */
+.section-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 /* Collapse control: the section title doubles as its show/hide button. */
 .section-toggle {
   display: inline-flex;
