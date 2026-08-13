@@ -12,10 +12,25 @@
  *   Live→app: v8 →"fromlive <json>"→ node →(broadcast)→ app
  *   app→Live: app →(ws)→ node →"cmd <json>"→ v8
  *
+ * ── One device per track, one app ─────────────────────────────────────────
+ *
+ * Drop the device on several tracks and every copy runs its own copy of this
+ * script, all wanting port 17999. Rather than the first one winning and the
+ * rest failing silently, they elect a hub:
+ *
+ *   hub        bound the port. Serves the app, and relays for the satellites.
+ *   satellite  port was taken, so it connects to the hub as a client and
+ *              forwards its own track's notes through it.
+ *
+ * The app therefore sees every track through one connection, with each note
+ * stamped with the track it came from. If the hub's device is removed the port
+ * frees up, and whichever satellite notices first takes over.
+ *
  * Protocol (JSON, one object per message):
- *   Device → app:  {type:"hello",port} | {type:"note",pitch,velocity}
- *                  {type:"transport",isPlaying} | {type:"tempo",tempo}
- *                  {type:"session",session} | {type:"pong"} | {type:"error",...}
+ *   Device → app:  {type:"hello",port,role} | {type:"note",pitch,velocity,track}
+ *                  {type:"tracks",tracks:[…]} | {type:"transport",isPlaying}
+ *                  {type:"tempo",tempo} | {type:"session",session}
+ *                  {type:"pong"} | {type:"error",...}
  *                  command replies: {id,ok,result} | {id,error}
  *   App → device:  {id?,type,...params}  e.g. {type:"set_tempo",tempo:128}
  */
@@ -23,35 +38,57 @@
 const Max = require('max-api');
 const http = require('http');
 const crypto = require('crypto');
+const net = require('net');
 
 const PORT = Number(process.env.CHORDLENS_WS_PORT) || 17999;
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+/** How long a satellite waits before checking whether the hub has gone. */
+const REELECT_MS = 2000;
 
 const clients = new Set(); // raw TCP sockets, upgraded to WebSocket
 let lastSession = null;
 let lastTransport = null;
 
+/** 'hub' once we own the port, 'satellite' when another device already does. */
+let role = 'starting';
+/** This device's own track, from the v8 Live API bridge. */
+let myTrack = null;
+/** Every track feeding this hub — ours plus the satellites'. Keyed by index. */
+const knownTracks = new Map();
+/** A satellite's connection to the hub. */
+let hubSocket = null;
+let reelectTimer = null;
+
 // ── WebSocket framing (RFC 6455) ──────────────────────────────────────────
 
-/** Encode a server→client frame (unmasked). opcode: 0x1 text, 0x9 ping, 0xA pong, 0x8 close. */
-function encodeFrame(payload, opcode) {
+/**
+ * Encode one frame. opcode: 0x1 text, 0x9 ping, 0xA pong, 0x8 close.
+ * Client→server frames must be masked; server→client frames must not be.
+ */
+function encodeFrame(payload, opcode, masked) {
   const len = payload.length;
+  const flag = masked ? 0x80 : 0x00;
   let header;
   if (len < 126) {
-    header = Buffer.from([0x80 | opcode, len]);
+    header = Buffer.from([0x80 | opcode, flag | len]);
   } else if (len < 65536) {
     header = Buffer.allocUnsafe(4);
     header[0] = 0x80 | opcode;
-    header[1] = 126;
+    header[1] = flag | 126;
     header.writeUInt16BE(len, 2);
   } else {
     header = Buffer.allocUnsafe(10);
     header[0] = 0x80 | opcode;
-    header[1] = 127;
+    header[1] = flag | 127;
     header.writeUInt32BE(Math.floor(len / 0x100000000), 2);
     header.writeUInt32BE(len >>> 0, 6);
   }
-  return Buffer.concat([header, payload]);
+  if (!masked) return Buffer.concat([header, payload]);
+
+  const key = crypto.randomBytes(4);
+  const body = Buffer.allocUnsafe(len);
+  for (let i = 0; i < len; i++) body[i] = payload[i] ^ key[i & 3];
+  return Buffer.concat([header, key, body]);
 }
 
 /** Pull one frame off `buf`; returns { opcode, payload, rest } or null if incomplete. */
@@ -86,19 +123,31 @@ function decodeFrame(buf) {
   return { opcode, payload, rest: buf.slice(offset + len) };
 }
 
-function sendText(socket, str) {
-  if (socket.writable) {
+function sendText(socket, str, masked) {
+  if (socket && socket.writable) {
     try {
-      socket.write(encodeFrame(Buffer.from(str, 'utf8'), 0x1));
+      socket.write(encodeFrame(Buffer.from(str, 'utf8'), 0x1, masked));
     } catch (e) {
       clients.delete(socket);
     }
   }
 }
 
+/** Send to the app(s). Satellites are peers, not an audience — skip them. */
 function broadcast(obj) {
   const data = JSON.stringify(obj);
-  for (const s of clients) sendText(s, data);
+  for (const s of clients) {
+    if (!s.isSatellite) sendText(s, data, false);
+  }
+}
+
+/**
+ * Emit a note or track announcement. The hub sends it to the app; a satellite
+ * sends it up to the hub, which relays it on our behalf.
+ */
+function publish(obj) {
+  if (role === 'satellite') sendText(hubSocket, JSON.stringify(obj), true);
+  else broadcast(obj);
 }
 
 /** Forward a command to the v8 object: cmd <jsonString>. */
@@ -106,7 +155,20 @@ function toLive(obj) {
   Max.outlet('cmd', JSON.stringify(obj));
 }
 
-// ── HTTP server + WebSocket upgrade ───────────────────────────────────────
+function trackRoster() {
+  return { type: 'tracks', tracks: Array.from(knownTracks.values()) };
+}
+
+/** Record a track we're now hearing from, and tell the app if it's new. */
+function noteTrack(track) {
+  if (!track || typeof track.index !== 'number') return;
+  const known = knownTracks.get(track.index);
+  if (known && known.name === track.name) return;
+  knownTracks.set(track.index, track);
+  if (role === 'hub') broadcast(trackRoster());
+}
+
+// ── Role: hub (we own the port) ───────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
   res.writeHead(426, { 'Content-Type': 'text/plain' });
@@ -131,23 +193,42 @@ server.on('upgrade', (req, socket) => {
   onConnect(socket);
 });
 
+server.on('listening', () => {
+  role = 'hub';
+  if (myTrack) knownTracks.set(myTrack.index, myTrack);
+  Max.post(
+    `ChordLens hub listening on ws://127.0.0.1:${PORT}` +
+      (myTrack ? ` (track ${myTrack.index}: ${myTrack.name})` : ''),
+  );
+});
+
 server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    // Another ChordLens device got here first — join it instead of dying.
+    becomeSatellite();
+    return;
+  }
   Max.post(`ChordLens WebSocket error: ${err.message}`, Max.POST_LEVELS.ERROR);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  Max.post(`ChordLens WebSocket listening on ws://127.0.0.1:${PORT}`);
-});
+function tryListen() {
+  try {
+    server.listen(PORT, '127.0.0.1');
+  } catch (e) {
+    scheduleReelection();
+  }
+}
 
 function onConnect(socket) {
   socket.isAlive = true;
+  socket.isSatellite = false;
   clients.add(socket);
-  Max.post(`ChordLens client connected (${clients.size} total)`);
 
   // Greet + replay cached state, then ask v8 for a fresh snapshot.
-  sendText(socket, JSON.stringify({ type: 'hello', port: PORT }));
-  if (lastSession) sendText(socket, JSON.stringify({ type: 'session', session: lastSession }));
-  if (lastTransport) sendText(socket, JSON.stringify(lastTransport));
+  sendText(socket, JSON.stringify({ type: 'hello', port: PORT, role: role }), false);
+  sendText(socket, JSON.stringify(trackRoster()), false);
+  if (lastSession) sendText(socket, JSON.stringify({ type: 'session', session: lastSession }), false);
+  if (lastTransport) sendText(socket, JSON.stringify(lastTransport), false);
   toLive({ type: 'get_session' });
 
   let buf = Buffer.alloc(0);
@@ -162,7 +243,10 @@ function onConnect(socket) {
   });
   socket.on('close', () => {
     clients.delete(socket);
-    Max.post(`ChordLens client disconnected (${clients.size} total)`);
+    if (socket.satelliteTrack != null) {
+      knownTracks.delete(socket.satelliteTrack);
+      broadcast(trackRoster());
+    }
   });
   socket.on('error', () => clients.delete(socket));
 }
@@ -173,7 +257,7 @@ function handleFrame(socket, frame) {
   if (opcode === 0x8) {
     // close
     try {
-      socket.end(encodeFrame(Buffer.alloc(0), 0x8));
+      socket.end(encodeFrame(Buffer.alloc(0), 0x8, false));
     } catch (e) {
       /* already gone */
     }
@@ -183,7 +267,7 @@ function handleFrame(socket, frame) {
   if (opcode === 0x9) {
     // ping → pong
     try {
-      socket.write(encodeFrame(payload, 0xa));
+      socket.write(encodeFrame(payload, 0xa, false));
     } catch (e) {
       clients.delete(socket);
     }
@@ -196,17 +280,117 @@ function handleFrame(socket, frame) {
   try {
     msg = JSON.parse(payload.toString('utf8'));
   } catch (e) {
-    sendText(socket, JSON.stringify({ type: 'error', message: 'bad json' }));
+    sendText(socket, JSON.stringify({ type: 'error', message: 'bad json' }), false);
     return;
   }
   if (msg.type === 'ping') {
-    sendText(socket, JSON.stringify({ type: 'pong' }));
+    sendText(socket, JSON.stringify({ type: 'pong' }), false);
     return;
   }
+
+  // A satellite device announcing itself, then feeding us its track's notes.
+  if (msg.type === 'device') {
+    socket.isSatellite = true;
+    if (msg.track && typeof msg.track.index === 'number') {
+      socket.satelliteTrack = msg.track.index;
+    }
+    noteTrack(msg.track);
+    return;
+  }
+  if (msg.type === 'note') {
+    broadcast(msg); // relay another track's playing to the app
+    return;
+  }
+
   toLive(msg);
 }
 
-// Drop clients that stop answering pings (half-open sockets).
+// ── Role: satellite (another device owns the port) ────────────────────────
+
+function becomeSatellite() {
+  role = 'satellite';
+  Max.post(
+    'ChordLens: port ' +
+      PORT +
+      ' already held by another ChordLens device — joining it as a satellite' +
+      (myTrack ? ` (track ${myTrack.index}: ${myTrack.name})` : ''),
+  );
+  connectToHub();
+}
+
+function connectToHub() {
+  const key = crypto.randomBytes(16).toString('base64');
+  const socket = net.connect(PORT, '127.0.0.1');
+  hubSocket = socket;
+
+  socket.on('connect', () => {
+    socket.write(
+      'GET / HTTP/1.1\r\n' +
+        `Host: 127.0.0.1:${PORT}\r\n` +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Key: ${key}\r\n` +
+        'Sec-WebSocket-Version: 13\r\n\r\n',
+    );
+  });
+
+  let handshakeDone = false;
+  let buf = Buffer.alloc(0);
+  socket.on('data', (chunk) => {
+    buf = Buffer.concat([buf, chunk]);
+    if (!handshakeDone) {
+      const end = buf.indexOf('\r\n\r\n');
+      if (end === -1) return;
+      const head = buf.slice(0, end).toString('utf8');
+      buf = buf.slice(end + 4);
+      if (!/^HTTP\/1\.1 101/.test(head)) {
+        socket.destroy();
+        return;
+      }
+      handshakeDone = true;
+      // Announce our track so the hub can label the notes we send it.
+      if (myTrack) sendText(socket, JSON.stringify({ type: 'device', track: myTrack }), true);
+    }
+    // The hub's broadcasts aren't for us; drain frames and drop them, but do
+    // answer pings so it doesn't cull us as a dead client.
+    for (;;) {
+      const frame = decodeFrame(buf);
+      if (!frame) break;
+      buf = frame.rest;
+      if (frame.opcode === 0x9) {
+        try {
+          socket.write(encodeFrame(frame.payload, 0xa, true));
+        } catch (e) {
+          /* closing */
+        }
+      }
+    }
+  });
+
+  const lost = () => {
+    if (hubSocket !== socket) return;
+    hubSocket = null;
+    scheduleReelection();
+  };
+  socket.on('close', lost);
+  socket.on('error', lost);
+}
+
+/**
+ * The hub went away (or never answered). Try to take the port ourselves; if
+ * someone else beat us to it, the EADDRINUSE handler puts us back here.
+ */
+function scheduleReelection() {
+  if (reelectTimer) return;
+  reelectTimer = setTimeout(() => {
+    reelectTimer = null;
+    role = 'starting';
+    tryListen();
+  }, REELECT_MS);
+}
+
+// ── Keep-alive (hub only) ─────────────────────────────────────────────────
+
 const keepAlive = setInterval(() => {
   for (const s of clients) {
     if (s.isAlive === false) {
@@ -220,7 +404,7 @@ const keepAlive = setInterval(() => {
     }
     s.isAlive = false;
     try {
-      s.write(encodeFrame(Buffer.alloc(0), 0x9)); // protocol ping
+      s.write(encodeFrame(Buffer.alloc(0), 0x9, false)); // protocol ping
     } catch (e) {
       clients.delete(s);
     }
@@ -232,7 +416,12 @@ server.on('close', () => clearInterval(keepAlive));
 
 // MIDI note from [midiin]→[midiparse]→[prepend note]:  note <pitch> <velocity>
 Max.addHandler('note', (pitch, velocity) => {
-  broadcast({ type: 'note', pitch: Number(pitch), velocity: Number(velocity) });
+  publish({
+    type: 'note',
+    pitch: Number(pitch),
+    velocity: Number(velocity),
+    track: myTrack ? myTrack.index : null,
+  });
 });
 
 // Events/replies from the v8 Live API bridge:  fromlive <jsonString>
@@ -244,6 +433,19 @@ Max.addHandler('fromlive', (jsonStr) => {
     Max.post(`bad fromlive json: ${e.message}`, Max.POST_LEVELS.ERROR);
     return;
   }
+
+  // Our own track identity — stamp it on our notes, and make sure it reaches
+  // the hub's roster (which is the only track list the app is told about).
+  if (obj.type === 'device') {
+    myTrack = obj.track;
+    noteTrack(myTrack);
+    if (role === 'satellite') sendText(hubSocket, JSON.stringify(obj), true);
+    return;
+  }
+
+  // Song-wide state (transport, tempo, key, session) is the same for every
+  // device in the set. Only the hub reports it, or the app gets duplicates.
+  if (role === 'satellite') return;
   if (obj.type === 'session' && obj.session) lastSession = obj.session;
   if (obj.type === 'transport') lastTransport = obj;
   broadcast(obj);
@@ -258,3 +460,4 @@ process.on('unhandledRejection', (reason) => {
 });
 
 Max.post('ChordLens node bridge loaded (dependency-free).');
+tryListen();

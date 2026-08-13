@@ -8,6 +8,7 @@ import { StatusIndicator } from '../components/StatusIndicator'
 import { AbletonStatus } from '../components/AbletonStatus'
 import { InputPicker } from '../components/InputPicker'
 import { KeyBadge } from '../components/KeyBadge'
+import { TrackPicker } from '../components/TrackPicker'
 import { ProgressionStrip } from '../components/ProgressionStrip'
 import { ProgressionStaff } from '../components/ProgressionStaff'
 import { PianoView } from '../components/PianoView'
@@ -53,6 +54,15 @@ function Visualizer() {
     () => [...heldNotes].sort((a, b) => a - b),
     [heldNotes],
   )
+
+  // Which Ableton tracks are sounding, so the picker can light them up.
+  const soundingTracks = useMemo(() => {
+    const sounding = new Set<number>()
+    live.notesByTrack.forEach((held, index) => {
+      if (held.size) sounding.add(index)
+    })
+    return sounding
+  }, [live.notesByTrack])
 
   // --- Pin / freeze a voicing -----------------------------------------------
   const [pinned, setPinned] = useState<Set<number> | null>(null)
@@ -156,6 +166,12 @@ function Visualizer() {
               onRefresh={refreshInputs}
             />
           )}
+          <TrackPicker
+            tracks={live.tracks}
+            value={live.trackFilter}
+            onPick={live.setTrackFilter}
+            playing={soundingTracks}
+          />
           <KeyBadge
             value={key}
             isAuto={isAuto}

@@ -3,5 +3,8 @@
   "version": "0.2.0",
   "private": true,
   "description": "Node-for-Max WebSocket bridge for the ChordLens Max for Live device (dependency-free)",
-  "main": "chordlens.server.js"
+  "main": "chordlens.server.js",
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  }
 }

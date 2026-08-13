@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   AbletonBridge,
+  applyNote,
+  heldFor,
   type AbletonEvent,
+  type AbletonTrack,
   type BridgeStatus,
   type SessionInfo,
 } from '#/lib/ableton'
@@ -31,10 +34,20 @@ export interface UseAbleton {
   isPlaying: boolean
   /** Ableton's song key (root pitch-class + scale name), or null. */
   liveKey: { rootPc: number; scaleName: string } | null
-  /** Notes currently held on the device's MIDI input. */
+  /**
+   * Notes currently held — from the chosen track, or every track at once when
+   * no track is chosen.
+   */
   heldNotes: Set<number>
   /** Sorted held pitches, low to high (matches usePushMidi). */
   pitches: number[]
+  /** Tracks with a ChordLens device on them, as reported by the hub. */
+  tracks: AbletonTrack[]
+  /** Held notes per track index, for showing which track is playing what. */
+  notesByTrack: Map<number, Set<number>>
+  /** Watch one track, or null to merge them all. */
+  trackFilter: number | null
+  setTrackFilter: (index: number | null) => void
 
   // Command helpers ---------------------------------------------------------
   setTempo: (bpm: number) => void
@@ -54,25 +67,33 @@ export function useAbleton(url?: string): UseAbleton {
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [tempo, setTempo] = useState<number | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [heldNotes, setHeldNotes] = useState<Set<number>>(new Set())
+  const [notesByTrack, setNotesByTrack] = useState<Map<number, Set<number>>>(
+    () => new Map(),
+  )
+  const [tracks, setTracks] = useState<AbletonTrack[]>([])
+  const [trackFilter, setTrackFilter] = useState<number | null>(null)
   const [liveKey, setLiveKey] = useState<{ rootPc: number; scaleName: string } | null>(null)
 
   useEffect(() => {
     const handleEvent = (ev: AbletonEvent) => {
       switch (ev.type) {
         case 'note':
-          setHeldNotes((prev) => {
-            const next = new Set(prev)
-            if (ev.velocity > 0) next.add(ev.pitch)
-            else next.delete(ev.pitch)
-            return next
-          })
+          setNotesByTrack((prev) => applyNote(prev, ev))
+          break
+        case 'tracks':
+          setTracks(ev.tracks)
+          // Don't keep watching a track whose device has gone.
+          setTrackFilter((current) =>
+            current != null && !ev.tracks.some((t) => t.index === current)
+              ? null
+              : current,
+          )
           break
         case 'transport':
           setIsPlaying(ev.isPlaying)
           // Stopping clears any notes left stuck on (Ableton doesn't always
           // send note-offs when the transport stops).
-          if (!ev.isPlaying) setHeldNotes(new Set())
+          if (!ev.isPlaying) setNotesByTrack(new Map())
           break
         case 'tempo':
           setTempo(ev.tempo)
@@ -154,10 +175,15 @@ export function useAbleton(url?: string): UseAbleton {
   const reconnect = useCallback(() => {
     // Refresh: drop stale local state (stuck keys, old transport), then
     // reconnect — the fresh session reply re-pulls tempo/transport/key.
-    setHeldNotes(new Set())
+    setNotesByTrack(new Map())
     setIsPlaying(false)
     bridgeRef.current?.reconnect()
   }, [])
+
+  const heldNotes = useMemo(
+    () => heldFor(notesByTrack, trackFilter),
+    [notesByTrack, trackFilter],
+  )
 
   const pitches = [...heldNotes].sort((a, b) => a - b)
 
@@ -170,6 +196,10 @@ export function useAbleton(url?: string): UseAbleton {
     liveKey,
     heldNotes,
     pitches,
+    tracks,
+    notesByTrack,
+    trackFilter,
+    setTrackFilter,
     setTempo: setTempoCmd,
     startPlayback,
     stopPlayback,

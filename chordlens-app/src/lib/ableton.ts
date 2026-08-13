@@ -8,13 +8,17 @@
  *
  * Protocol (mirror of max-for-live/chordlens.server.js):
  *   Device → app (events):
- *     { type: "hello", port }
- *     { type: "note", pitch, velocity }        // velocity 0 == note-off
+ *     { type: "hello", port, role }
+ *     { type: "note", pitch, velocity, track }  // velocity 0 == note-off
+ *     { type: "tracks", tracks }                // every track feeding the hub
  *     { type: "transport", isPlaying }
  *     { type: "tempo", tempo }
  *     { type: "session", session }
  *   Device → app (command replies): { id, ok, result } | { id, error }
  *   App → device (commands):        { id?, type, ...params }
+ *
+ * One device can be on each track. They elect a hub that owns the port and
+ * relays for the rest, so this stays a single connection carrying every track.
  */
 
 export const DEFAULT_ABLETON_WS = 'ws://127.0.0.1:17999'
@@ -31,10 +35,25 @@ export interface SessionInfo {
   scaleName?: string
 }
 
+/** An Ableton track with a ChordLens device on it. */
+export interface AbletonTrack {
+  /** Index in the Live set, and the id used to stamp notes. */
+  index: number
+  name: string
+  color?: number | null
+}
+
 /** Events pushed from the device. */
 export type AbletonEvent =
-  | { type: 'hello'; port: number }
-  | { type: 'note'; pitch: number; velocity: number }
+  | { type: 'hello'; port: number; role?: string }
+  | {
+      type: 'note'
+      pitch: number
+      velocity: number
+      /** Track the note came from; null from a device that hasn't resolved one. */
+      track?: number | null
+    }
+  | { type: 'tracks'; tracks: AbletonTrack[] }
   | { type: 'transport'; isPlaying: boolean }
   | { type: 'tempo'; tempo: number }
   | { type: 'key'; rootPc: number; scaleName: string }
@@ -42,6 +61,44 @@ export type AbletonEvent =
   | { type: 'error'; message: string }
 
 export type BridgeStatus = 'connecting' | 'open' | 'closed'
+
+/** Bucket for notes from a device that hasn't resolved its track yet. */
+export const UNTRACKED = -1
+
+/**
+ * Apply one note event to the per-track held sets, returning a new map.
+ *
+ * Notes are kept per track rather than in one pile so several ChordLens
+ * devices can feed the app at once and still be told apart — a bass line and a
+ * pad arriving together are two parts, not one nine-note chord.
+ */
+export function applyNote(
+  byTrack: ReadonlyMap<number, Set<number>>,
+  note: { pitch: number; velocity: number; track?: number | null },
+): Map<number, Set<number>> {
+  const key = note.track ?? UNTRACKED
+  const next = new Map(byTrack)
+  const held = new Set(next.get(key) ?? [])
+  if (note.velocity > 0) held.add(note.pitch)
+  else held.delete(note.pitch)
+  // Drop empty tracks so "which tracks are sounding" is just the key set.
+  if (held.size) next.set(key, held)
+  else next.delete(key)
+  return next
+}
+
+/** One track's held notes, or every track folded together when filter is null. */
+export function heldFor(
+  byTrack: ReadonlyMap<number, Set<number>>,
+  filter: number | null,
+): Set<number> {
+  if (filter != null) return new Set(byTrack.get(filter) ?? [])
+  const merged = new Set<number>()
+  for (const held of byTrack.values()) {
+    for (const pitch of held) merged.add(pitch)
+  }
+  return merged
+}
 
 /** Commands the device understands (params per command). */
 export interface Commands {

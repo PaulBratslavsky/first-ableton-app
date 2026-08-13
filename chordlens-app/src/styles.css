@@ -107,6 +107,10 @@ body {
 }
 .pin-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
 .pin-btn:disabled { opacity: 0.45; cursor: default; }
+/* Track picker: one button per track with a ChordLens device on it. */
+.track-picker { display: inline-flex; align-items: center; gap: 4px; }
+/* A track that's sounding right now, whether or not it's the one being watched. */
+.pin-btn--sounding { border-color: var(--accent-dim); }
 .pin-btn--active {
   background: var(--accent-soft);
   border-color: var(--accent);

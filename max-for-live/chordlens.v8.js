@@ -27,6 +27,8 @@ outlets = 1;
 
 var observersReady = false;
 var observers = []; // keep references so they aren't garbage-collected
+var trackObserver = null; // re-made whenever this device's track changes
+var lastTrack = null;
 
 /**
  * One-shot LiveAPI accessor. The two-arg form (callback, path) is required:
@@ -63,7 +65,74 @@ function replyError(id, message) {
 /** live.thisdevice sends a bang once the device is fully instantiated. */
 function bang() {
   ensureObservers();
+  pushTrack();
   pushSession();
+}
+
+// ── Which track am I on? ──────────────────────────────────────────────────
+//
+// Several copies of this device can be in one set, one per track. Each needs to
+// say which track its notes came from, so the app can tell them apart instead
+// of merging every track into one chord.
+
+/**
+ * Walk up from this device to the track that owns it. A device sitting on a
+ * track is one hop (`live_set tracks 3 devices 0` → `live_set tracks 3`); one
+ * inside a rack is several, via the chain.
+ */
+function trackIdentity() {
+  var node = api('this_device');
+  for (var hops = 0; hops < 8; hops++) {
+    var path = String(node.path).replace(/^"|"$/g, '');
+    var match = path.match(/^live_set tracks (\d+)$/);
+    if (match) {
+      return { index: Number(match[1]), name: str(node, 'name'), color: num(node, 'color') };
+    }
+    if (!path) return null;
+    node = api(path + ' canonical_parent');
+  }
+  return null;
+}
+
+/**
+ * Tell node.script which track this device is on, and keep watching that
+ * track's name so a rename shows up in the app.
+ */
+function pushTrack() {
+  var track;
+  try {
+    track = trackIdentity();
+  } catch (e) {
+    emit({ type: 'error', message: 'track identity unavailable: ' + e });
+    return;
+  }
+  if (!track) return;
+
+  var changed =
+    !lastTrack || lastTrack.index !== track.index || lastTrack.name !== track.name;
+  lastTrack = track;
+  if (changed) emit({ type: 'device', track: track });
+
+  // Re-point the name observer whenever the track index moves under us.
+  try {
+    trackObserver = new LiveAPI(onTrackName, 'live_set tracks ' + track.index);
+    trackObserver.property = 'name';
+  } catch (e) {
+    trackObserver = null;
+  }
+}
+
+function onTrackName(args) {
+  if (!args || args[0] !== 'name' || !lastTrack) return;
+  var name = args.length > 1 ? String(args[1]) : lastTrack.name;
+  if (name === lastTrack.name) return;
+  lastTrack = { index: lastTrack.index, name: name, color: lastTrack.color };
+  emit({ type: 'device', track: lastTrack });
+}
+
+/** Reordering or deleting tracks changes our index — re-resolve it. */
+function onTracks() {
+  pushTrack();
 }
 
 /** Commands from node.script arrive as: cmd <jsonString> */
@@ -92,6 +161,7 @@ function ensureObservers() {
   addObserver(onTempo, 'tempo');
   addObserver(onKey, 'root_note');
   addObserver(onKey, 'scale_name');
+  addObserver(onTracks, 'tracks');
 }
 
 function addObserver(callback, prop) {

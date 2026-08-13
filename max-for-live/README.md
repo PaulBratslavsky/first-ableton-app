@@ -101,6 +101,27 @@ const live = useAbleton() // ws://127.0.0.1:17999 by default
 The client auto-reconnects (with a heartbeat/watchdog), so launch order doesn't
 matter; the chip's **↻** button forces an immediate reconnect.
 
+## One device per track
+
+Put the device on as many tracks as you like. Each copy runs its own bridge, and
+they all want the same port, so they elect roles:
+
+- the first to bind port 17999 is the **hub** — it serves the app and relays for
+  the others;
+- the rest become **satellites**, connecting to the hub as clients and forwarding
+  their own track's notes through it.
+
+So the app keeps one connection but sees every track, with each note stamped with
+the track that played it (the header grows a track picker once a second device
+appears). Remove the hub's device and the port frees up; whichever satellite
+notices first — within a couple of seconds — takes over.
+
+Song-wide state (transport, tempo, key, session) is reported by the hub alone, so
+it doesn't arrive once per device.
+
+Run `npm test` in this folder to exercise the election, relaying and failover
+with two real bridges (`max-api` stubbed, since it only exists inside Ableton).
+
 ## WebSocket protocol
 
 Plain JSON, one object per message, on `ws://127.0.0.1:17999`. Override the port
@@ -109,8 +130,9 @@ with `CHORDLENS_WS_PORT` (node side) and the `url` arg to `useAbleton`.
 ### Device → app (events)
 | Message | Meaning |
 |---------|---------|
-| `{ "type": "hello", "port": 17999 }` | sent on connect |
-| `{ "type": "note", "pitch": 60, "velocity": 100 }` | MIDI note; `velocity: 0` = note-off |
+| `{ "type": "hello", "port": 17999, "role": "hub" }` | sent on connect |
+| `{ "type": "note", "pitch": 60, "velocity": 100, "track": 0 }` | MIDI note; `velocity: 0` = note-off. `track` is the Live track index, or `null` before the device has resolved one |
+| `{ "type": "tracks", "tracks": [{ "index": 0, "name": "Keys" }] }` | every track currently feeding the hub; re-sent when one joins, leaves or is renamed |
 | `{ "type": "transport", "isPlaying": true }` | transport changed |
 | `{ "type": "tempo", "tempo": 128.0 }` | tempo changed |
 | `{ "type": "key", "rootPc": 0, "scaleName": "Major" }` | song key changed |
