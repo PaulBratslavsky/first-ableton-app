@@ -8,6 +8,7 @@ import {
 } from '../lib/music'
 import { voicingsFor, MUTED, type Voicing } from '../lib/voicings'
 import { pitchColor, textOn } from '../lib/colors'
+import { SectionHead } from './SectionHead'
 import { NOTE_NAMES } from '../lib/config'
 
 // Geometry.
@@ -55,6 +56,9 @@ interface Props {
    */
   showNames?: boolean
   onToggleNames?: () => void
+  /** Whether the neck is showing. Omit `onToggle` for a fixed header. */
+  open?: boolean
+  onToggle?: () => void
 }
 
 export function FretboardView({
@@ -68,6 +72,8 @@ export function FretboardView({
   chordSymbol,
   showNames = false,
   onToggleNames,
+  open = true,
+  onToggle,
 }: Props) {
   const strings = tuning.length
   const nutX = LABEL_W + OPEN_W
@@ -169,13 +175,19 @@ export function FretboardView({
 
   return (
     <figure className="fretboard">
-      <figcaption className="view-title view-title--row">
-        <span>
-          {label}
-          {chordActive && chordSymbol && (
-            <span className="fb-chord-name">{chordSymbol}</span>
-          )}
-        </span>
+      <SectionHead
+        title={
+          <>
+            {label}
+            {chordActive && chordSymbol && (
+              <span className="fb-chord-name">{chordSymbol}</span>
+            )}
+          </>
+        }
+        open={open}
+        onToggle={onToggle}
+        controls={`${label.toLowerCase()}-neck`}
+      >
         <span className="fb-pos">
           <button
             type="button"
@@ -260,8 +272,10 @@ export function FretboardView({
             </button>
           )}
         </span>
-      </figcaption>
+      </SectionHead>
+      {open && (
       <svg
+        id={`${label.toLowerCase()}-neck`}
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
@@ -494,6 +508,7 @@ export function FretboardView({
           )
         })}
       </svg>
+      )}
     </figure>
   )
 }

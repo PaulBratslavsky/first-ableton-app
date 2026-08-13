@@ -9,6 +9,7 @@ import { AbletonStatus } from '../components/AbletonStatus'
 import { InputPicker } from '../components/InputPicker'
 import { KeyBadge } from '../components/KeyBadge'
 import { TrackTabs } from '../components/TrackTabs'
+import { SectionHead } from '../components/SectionHead'
 import { ProgressionStrip } from '../components/ProgressionStrip'
 import { ProgressionStaff } from '../components/ProgressionStaff'
 import { PianoView } from '../components/PianoView'
@@ -114,7 +115,22 @@ function Visualizer() {
   const keyPcs = useMemo(() => (key ? scalePcs(key) : null), [key])
   const rootPc = key ? tonicPc(key) : null
   const [showScale, setShowScale] = useState(true)
-  const [showPush, setShowPush] = useState(true)
+
+  // Each view folds away on its own — with six stacked up, which ones you want
+  // on screen depends on what you're playing.
+  const [open, setOpen] = useState({
+    sheet: true,
+    piano: true,
+    guitar: true,
+    bass: true,
+    push: true,
+    notation: true,
+  })
+  const toggleSection = useCallback(
+    (view: keyof typeof open) => () =>
+      setOpen((prev) => ({ ...prev, [view]: !prev[view] })),
+    [],
+  )
 
   // Note-name overlays, toggled per view — you rarely want all four at once.
   const [names, setNames] = useState({
@@ -182,14 +198,6 @@ function Visualizer() {
           </button>
           <button
             type="button"
-            className={`pin-btn${showPush ? ' pin-btn--active' : ''}`}
-            onClick={() => setShowPush((s) => !s)}
-            title="Show the Push-style chromatic pad grid"
-          >
-            Push
-          </button>
-          <button
-            type="button"
             className={`pin-btn${frozen ? ' pin-btn--active' : ''}`}
             onClick={togglePin}
             disabled={!frozen && heldNotes.size === 0}
@@ -222,54 +230,70 @@ function Visualizer() {
 
       {/* Continuous notation sheet of the whole progression, above the piano. */}
       <section className="panel panel--sheet">
-        <div className="view-title">Progression · sheet</div>
-        <div className="sheet-scroll">
-          {history.length === 0 ? (
-            <p className="idle-hint" style={{ visibility: 'visible' }}>
-              Play a progression — it'll be written out here, chord by chord.
-            </p>
-          ) : (
-            <ProgressionStaff
-              history={history}
-              useFlats={useFlats}
-              tempo={live.tempo}
-              running={status === 'demo' || status === 'listening' || live.isPlaying}
-            />
-          )}
-        </div>
+        <SectionHead
+          title="Progression · sheet"
+          open={open.sheet}
+          onToggle={toggleSection('sheet')}
+          controls="sheet-body"
+        />
+        {open.sheet && (
+          <div id="sheet-body" className="sheet-scroll">
+            {history.length === 0 ? (
+              <p className="idle-hint" style={{ visibility: 'visible' }}>
+                Play a progression — it'll be written out here, chord by chord.
+              </p>
+            ) : (
+              <ProgressionStaff
+                history={history}
+                useFlats={useFlats}
+                tempo={live.tempo}
+                running={status === 'demo' || status === 'listening' || live.isPlaying}
+              />
+            )}
+          </div>
+        )}
       </section>
 
       {/* Piano — the hero view. */}
       <section className="panel panel--hero">
-        <div className="view-title view-title--row">
-          <span className="view-title-lead">
-            Piano{frozen ? ' · pinned' : ''}
-            <button
-              type="button"
-              className={`fb-pos-auto${names.piano ? ' fb-pos-auto--on' : ''}`}
-              onClick={toggleNames('piano')}
-              title="Name every key"
-            >
-              Names
-            </button>
-          </span>
+        <SectionHead
+          title={`Piano${frozen ? ' · pinned' : ''}`}
+          open={open.piano}
+          onToggle={toggleSection('piano')}
+          controls="piano-body"
+        >
+          <button
+            type="button"
+            className={`fb-pos-auto${names.piano ? ' fb-pos-auto--on' : ''}`}
+            onClick={toggleNames('piano')}
+            title="Name every key"
+          >
+            Names
+          </button>
           <span className="now-playing">
             {nowPlaying}
             {roman && <span className="roman">{roman}</span>}
           </span>
-        </div>
-        <PianoView
-          heldNotes={displayNotes}
-          keyPcs={keyPcs}
-          scaleGuide={scaleGuide}
-          showNames={names.piano}
-        />
-        {/* Always rendered (hidden while playing) so the panel never resizes. */}
-        <p className="idle-hint" style={{ visibility: isIdle ? 'visible' : 'hidden' }}>
-          {status === 'no-input' && !live.connected
-            ? 'Choose a MIDI input above, or play into the ChordLens device in Ableton, to begin.'
-            : 'Play something — the views will light up here.'}
-        </p>
+        </SectionHead>
+        {open.piano && (
+          <div id="piano-body">
+            <PianoView
+              heldNotes={displayNotes}
+              keyPcs={keyPcs}
+              scaleGuide={scaleGuide}
+              showNames={names.piano}
+            />
+            {/* Always rendered (hidden while playing) so the panel never resizes. */}
+            <p
+              className="idle-hint"
+              style={{ visibility: isIdle ? 'visible' : 'hidden' }}
+            >
+              {status === 'no-input' && !live.connected
+                ? 'Choose a MIDI input above, or play into the ChordLens device in Ableton, to begin.'
+                : 'Play something — the views will light up here.'}
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="grid">
@@ -285,6 +309,8 @@ function Visualizer() {
             chordSymbol={chord?.chordSymbol ?? null}
             showNames={names.guitar}
             onToggleNames={toggleNames('guitar')}
+            open={open.guitar}
+            onToggle={toggleSection('guitar')}
           />
         </div>
         <div className="panel">
@@ -298,36 +324,47 @@ function Visualizer() {
             useFlats={useFlats}
             showNames={names.bass}
             onToggleNames={toggleNames('bass')}
+            open={open.bass}
+            onToggle={toggleSection('bass')}
           />
         </div>
       </section>
 
-      {showPush && (
         <section className="panel panel--sheet">
-          <div className="view-title view-title--row">
-            <span className="view-title-lead">
-              Push · chromatic
-              <button
-                type="button"
-                className={`fb-pos-auto${names.push ? ' fb-pos-auto--on' : ''}`}
-                onClick={toggleNames('push')}
-                title="Name every pad"
-              >
-                Names
-              </button>
-            </span>
-          </div>
-          <PushView
-            heldNotes={displayNotes}
-            scalePcs={keyPcs}
-            rootPc={rootPc}
-            showNames={names.push}
-          />
+          <SectionHead
+            title="Push · chromatic"
+            open={open.push}
+            onToggle={toggleSection('push')}
+            controls="push-body"
+          >
+            <button
+              type="button"
+              className={`fb-pos-auto${names.push ? ' fb-pos-auto--on' : ''}`}
+              onClick={toggleNames('push')}
+              title="Name every pad"
+            >
+              Names
+            </button>
+          </SectionHead>
+          {open.push && (
+            <div id="push-body">
+              <PushView
+                heldNotes={displayNotes}
+                scalePcs={keyPcs}
+                rootPc={rootPc}
+                showNames={names.push}
+              />
+            </div>
+          )}
         </section>
-      )}
 
         <section className="panel panel--notation">
-          <NotationView heldNotes={displayNotes} useFlats={useFlats} />
+          <NotationView
+            heldNotes={displayNotes}
+            useFlats={useFlats}
+            open={open.notation}
+            onToggle={toggleSection('notation')}
+          />
         </section>
       </div>
     </main>
