@@ -11,6 +11,7 @@ import {
 import { CLEF_SPLIT, NOTE_NAMES, FLAT_NAMES } from '../lib/config'
 import { detectChord, pitchClass, compactVoicing } from '../lib/music'
 import { pitchColor } from '../lib/colors'
+import { SectionHead } from './SectionHead'
 
 const WIDTH = 360
 const HEIGHT = 280
@@ -70,9 +71,17 @@ interface Props {
   heldNotes: Set<number>
   /** Spell accidentals as flats to match the detected key. */
   useFlats?: boolean
+  /** Whether the staff is showing. Omit `onToggle` for a fixed header. */
+  open?: boolean
+  onToggle?: () => void
 }
 
-export function NotationView({ heldNotes, useFlats = false }: Props) {
+export function NotationView({
+  heldNotes,
+  useFlats = false,
+  open = true,
+  onToggle,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const pitches = [...heldNotes].sort((a, b) => a - b)
@@ -116,11 +125,10 @@ export function NotationView({ heldNotes, useFlats = false }: Props) {
 
   return (
     <figure className="notation">
-      <figcaption className="view-title">
-        Notation
+      <SectionHead title="Notation" open={open} onToggle={onToggle} controls="notation-body">
         <span className="chord-symbol">{chordSymbol ?? '—'}</span>
-      </figcaption>
-      <div className="notation-canvas" ref={containerRef} />
+      </SectionHead>
+      {open && <div id="notation-body" className="notation-canvas" ref={containerRef} />}
     </figure>
   )
 }

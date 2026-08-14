@@ -72,12 +72,37 @@ patch is self-contained, so paste it in one shot:
 > Ignore any `crash recovery: patcher no longer exists …` lines — that's unrelated
 > Max housekeeping about its own demo patches.
 
+## After you edit a script: `./install-device.sh`
+
+The `.amxd` loads `chordlens.server.js` / `chordlens.v8.js` by bare filename,
+resolved next to the device itself. The moment you drag the device into Live,
+Ableton copies it into your **User Library** — and from then on Live reads *those*
+copies, not the ones in this repo. Editing here changes nothing in Live, silently.
+
+```bash
+./install-device.sh          # copy the scripts to every install found
+./install-device.sh --check  # report drift, change nothing (exit 1 if stale)
+```
+
+The device watches its scripts (`@watch 1` on `node.script`, `autowatch = 1` in
+`v8`), so it reloads on its own — the Max console should print
+`ChordLens hub listening on ws://127.0.0.1:17999 (track N: Name)`.
+
+Set `ABLETON_USER_LIBRARY` if yours isn't at `~/Music/Ableton/User Library`.
+
+If the console still shows the old `ChordLens WebSocket listening …` line, the
+scripts didn't reload — remove and re-add the device, or reopen the set.
+
 ## Freeze it (recommended for a portable device)
 
 Freezing bundles the two `.js` files **into** the `.amxd`, so it works from any
 location and Ableton's habit of copying devices can't separate it from its
 scripts. Because it's dependency-free, freezing is trivial — there's no
 `node_modules` to bundle.
+
+Freeze for distribution, not while developing: a frozen device ignores the
+scripts on disk entirely, so `install-device.sh` can't reach it and edits need an
+unfreeze/re-freeze round trip.
 
 1. In the Max editor, click the **❄️ snowflake "Freeze Device"** button in the
    toolbar.
@@ -101,6 +126,27 @@ const live = useAbleton() // ws://127.0.0.1:17999 by default
 The client auto-reconnects (with a heartbeat/watchdog), so launch order doesn't
 matter; the chip's **↻** button forces an immediate reconnect.
 
+## One device per track
+
+Put the device on as many tracks as you like. Each copy runs its own bridge, and
+they all want the same port, so they elect roles:
+
+- the first to bind port 17999 is the **hub** — it serves the app and relays for
+  the others;
+- the rest become **satellites**, connecting to the hub as clients and forwarding
+  their own track's notes through it.
+
+So the app keeps one connection but sees every track, with each note stamped with
+the track that played it (a track tab bar appears above the views once a second
+device shows up). Remove the hub's device and the port frees up; whichever satellite
+notices first — within a couple of seconds — takes over.
+
+Song-wide state (transport, tempo, key, session) is reported by the hub alone, so
+it doesn't arrive once per device.
+
+Run `npm test` in this folder to exercise the election, relaying and failover
+with two real bridges (`max-api` stubbed, since it only exists inside Ableton).
+
 ## WebSocket protocol
 
 Plain JSON, one object per message, on `ws://127.0.0.1:17999`. Override the port
@@ -109,8 +155,9 @@ with `CHORDLENS_WS_PORT` (node side) and the `url` arg to `useAbleton`.
 ### Device → app (events)
 | Message | Meaning |
 |---------|---------|
-| `{ "type": "hello", "port": 17999 }` | sent on connect |
-| `{ "type": "note", "pitch": 60, "velocity": 100 }` | MIDI note; `velocity: 0` = note-off |
+| `{ "type": "hello", "port": 17999, "role": "hub" }` | sent on connect |
+| `{ "type": "note", "pitch": 60, "velocity": 100, "track": 0 }` | MIDI note; `velocity: 0` = note-off. `track` is the Live track index, or `null` before the device has resolved one |
+| `{ "type": "tracks", "tracks": [{ "index": 0, "name": "Keys" }] }` | every track currently feeding the hub; re-sent when one joins, leaves or is renamed |
 | `{ "type": "transport", "isPlaying": true }` | transport changed |
 | `{ "type": "tempo", "tempo": 128.0 }` | tempo changed |
 | `{ "type": "key", "rootPc": 0, "scaleName": "Major" }` | song key changed |

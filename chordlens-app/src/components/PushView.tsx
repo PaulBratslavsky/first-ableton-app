@@ -7,7 +7,8 @@ import {
 import { pitchClass, noteName } from '../lib/music'
 import { pitchColor, textOn } from '../lib/colors'
 
-// Geometry (SVG user units; scales via viewBox).
+// Geometry (SVG user units; scales via viewBox). Pads are square, like the
+// hardware's — the grid grows to fill the panel's height and centres itself.
 const PAD = 42
 const GAP = 6
 const STEP = PAD + GAP
@@ -49,6 +50,11 @@ interface Props {
   scalePcs?: Set<number> | null
   /** Pitch-class of the scale root, emphasized. */
   rootPc?: number | null
+  /**
+   * Name every pad, not just the roots. Always spelled with sharps — the
+   * overlay is a fixed map of the grid, not a reading of the current key.
+   */
+  showNames?: boolean
 }
 
 /**
@@ -56,7 +62,12 @@ interface Props {
  * in-scale pads are faintly tinted (root pads a little brighter and ringed);
  * out-of-scale pads stay dark — so you see the scale shape and what's playing.
  */
-export function PushView({ heldNotes, scalePcs, rootPc }: Props) {
+export function PushView({
+  heldNotes,
+  scalePcs,
+  rootPc,
+  showNames = false,
+}: Props) {
   return (
     <svg
       className="push"
@@ -105,11 +116,13 @@ export function PushView({ heldNotes, scalePcs, rootPc }: Props) {
               strokeOpacity={strokeOpacity}
               strokeWidth={strokeWidth}
             />
-            {isRoot && (
+            {(isRoot || showNames) && (
               <text
                 x={pad.x + PAD / 2}
                 y={pad.y + PAD / 2}
-                className="push-label"
+                className={`push-label${
+                  showNames && !isRoot && !held ? ' push-label--dim' : ''
+                }`}
                 style={{ fill: held ? textOn(color) : color }}
               >
                 {noteName(pad.note)}

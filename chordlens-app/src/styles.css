@@ -70,6 +70,7 @@ body {
 }
 .input-picker-label,
 .key-badge-label,
+.track-picker-label,
 .status-label {
   white-space: nowrap;
 }
@@ -107,6 +108,54 @@ body {
 }
 .pin-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
 .pin-btn:disabled { opacity: 0.45; cursor: default; }
+/* ---- Track tabs ---- */
+/* Which Ableton track everything below is showing. Only one can be active, so
+   it's a tab bar rather than a row of toggles that all look switched on. */
+.track-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.track-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* sit the underline on the bar's own border */
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.track-tab:hover { color: var(--text); background: var(--panel); }
+.track-tab--on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--panel);
+}
+.track-tab:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: -2px; }
+/*
+ * Whether a track is sounding is a different question from whether you're
+ * watching it, so it gets its own mark. Colouring the border for both made
+ * every button look selected.
+ */
+.track-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+  transition: background 90ms linear;
+}
+.track-dot--on { background: var(--accent); }
 .pin-btn--active {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -311,9 +360,11 @@ body {
   margin-bottom: 16px;
   padding: 18px 22px 22px;
 }
+/* Guitar and bass stack full-width: a 15-fret neck squeezed into half the
+   window leaves the frets too narrow to letter or to read chord shapes in. */
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -330,6 +381,55 @@ body {
   color: var(--muted);
   margin-bottom: 12px;
 }
+/* Title, its collapse control, and any controls that belong beside it. */
+.section-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* Collapse control: the section title doubles as its show/hide button. */
+.section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.section-toggle:hover { color: var(--text); }
+.section-toggle:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 3px; }
+/*
+ * The chevron carries the affordance: a bare glyph next to a muted title reads
+ * as decoration, so it gets the same chip treatment as the app's other buttons.
+ */
+.section-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 120ms ease, border-color 120ms linear, color 120ms linear;
+}
+.section-toggle:hover .section-chevron {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.section-chevron--closed { transform: rotate(-90deg); }
+/* Folded away, the header is the whole panel — don't leave a gap under it. */
+.view-title--collapsed { margin-bottom: 0; min-height: 22px; }
 .view-title--row {
   position: relative; /* anchor for the absolutely-positioned now-playing label */
   display: flex;
@@ -337,6 +437,12 @@ body {
   justify-content: space-between;
   min-height: 30px;
   gap: 12px;
+}
+/* Title text plus its own controls, kept clear of the now-playing label. */
+.view-title-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 .now-playing {
   /* Out of flow entirely so the changing note label can never affect layout. */
@@ -386,8 +492,18 @@ body {
   fill: #7c8295;
   font-size: 9px;
   text-anchor: middle;
+  pointer-events: none;
 }
-.key-scale-dot { opacity: 0.5; }
+/* On a black key the label sits on dark paint, so it needs to be lighter. */
+.key-label--black {
+  fill: #9aa1b4;
+  font-size: 7px;
+}
+/* A held key is painted its pitch colour — go dark so the name still reads. */
+.key-label--on-held {
+  fill: rgba(0, 0, 0, 0.65);
+}
+.key-scale-dot { opacity: 0.85; }
 
 /* ---- Fretboard ---- */
 .fretboard svg,
@@ -406,7 +522,12 @@ body {
 /* Dot fill is an inline per-note color. */
 .fb-note { stroke: rgba(0, 0, 0, 0.4); stroke-width: 1; }
 .fb-note--outside { stroke: #f4f6fb; stroke-width: 2; stroke-dasharray: 3 2; }
-.fb-scale-dot { opacity: 0.32; }
+/* The scale guide should be readable across a whole neck, not just detectable. */
+.fb-scale-dot {
+  opacity: 0.72;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 1;
+}
 .fb-note-label {
   font-size: 9px;
   font-weight: 700;
@@ -433,11 +554,72 @@ body {
   font-size: 11px;
   cursor: pointer;
   line-height: 1.4;
+  /* Usable inside an uppercased .view-title, not just inside .fb-pos. */
+  text-transform: none;
+  letter-spacing: 0;
 }
 .fb-pos-btn:hover:not(:disabled),
 .fb-pos-auto:hover { border-color: var(--accent-dim); color: var(--accent); }
 .fb-pos-btn:disabled { opacity: 0.35; cursor: default; }
-.fb-pos-label { color: var(--muted); min-width: 46px; text-align: center; }
+.fb-pos-label { color: var(--muted); min-width: 72px; text-align: center; }
+.fb-pos-auto:disabled { opacity: 0.35; cursor: default; }
+.fb-pos-auto:disabled:hover { border-color: var(--line); color: var(--text); }
+/* Chord-shape extras: one box per grip, the barre bar, the "skip me" mark. */
+.fb-shape-box {
+  fill: currentColor;
+  fill-opacity: 0.06;
+  stroke: currentColor;
+  stroke-opacity: 0.75;
+  stroke-width: 1.2;
+}
+.fb-shape-label {
+  fill: currentColor;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Adjacent grips overlap on the neck; separate hues keep them apart. */
+.fb-shape--0 { color: #4ade80; }
+.fb-shape--1 { color: #60a5fa; }
+.fb-shape--2 { color: #fbbf24; }
+.fb-chord-name {
+  margin-left: 8px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.fb-barre {
+  fill: #f4f6fb;
+  opacity: 0.22;
+  stroke: #f4f6fb;
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+.fb-mute {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+/* Note-name overlay: readable, but never louder than what's playing. The
+   knockout stroke stops the string line running straight through the text. */
+.fb-name {
+  fill: #858c9f;
+  font-size: 9px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  stroke: #20160f;
+  stroke-width: 2.5;
+  paint-order: stroke;
+}
+/* With names up, the scale guide's dots would hide behind them — the key is
+   carried by which letters are lit instead. */
+.fb-name--in-key { fill: var(--accent); opacity: 0.85; }
 .fb-pos-auto--on {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -468,9 +650,11 @@ body {
 }
 
 /* ---- Push pad grid ---- */
+/* Square pads, so the grid can only be as wide as it is tall — it grows to
+   fill the panel's height and centres, rather than sitting small in the middle. */
 .push {
   width: 100%;
-  max-height: 440px;
+  max-height: 620px;
   display: block;
   margin: 0 auto;
 }
@@ -480,10 +664,12 @@ body {
 .push-label {
   text-anchor: middle;
   dominant-baseline: central;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   pointer-events: none;
 }
+/* Overlay names on off-scale pads: present, but they recede. */
+.push-label--dim { opacity: 0.42; font-weight: 500; }
 
 @media (max-width: 720px) {
   .grid { grid-template-columns: 1fr; }

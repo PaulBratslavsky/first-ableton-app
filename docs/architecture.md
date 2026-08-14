@@ -13,6 +13,7 @@ This document describes how the pieces fit together.
   - [React frontend](#react-frontend)
 - [Ableton integration](#ableton-integration)
   - [Path A — Max for Live device (primary)](#path-a--max-for-live-device-primary)
+  - [Several tracks at once](#several-tracks-at-once)
   - [Path B — AbletonMCP socket (LLM / scripting)](#path-b--abletonmcp-socket-llm--scripting)
 - [Note sources, merged](#note-sources-merged)
 - [Protocols](#protocols)
@@ -38,15 +39,20 @@ flowchart LR
   end
 
   subgraph LIVE["Ableton Live"]
-    M4L[ChordLens.amxd<br/>Max for Live device]
+    direction TB
+    HUB["ChordLens.amxd<br/>on 'Keys' — hub"]
+    SAT["ChordLens.amxd<br/>on 'Bass' — satellite"]
+    SAT -->|forwards its notes| HUB
     MCP[AbletonMCP<br/>remote script]
   end
 
-  M4L <-->|WebSocket :17999| FE
+  HUB <-->|WebSocket :17999| FE
   MCP <-->|TCP/JSON :9877| EXT[External scripts / Claude]
-
-  PLAY[Played notes] --> M4L
 ```
+
+One device goes on each track you want to watch. They elect a hub so the app
+keeps a single connection while seeing every track — see
+[Several tracks at once](#several-tracks-at-once).
 
 Two independent bridges into Live coexist (different ports, different
 mechanisms):
@@ -104,18 +110,20 @@ presentational view components.
 flowchart TD
   subgraph hooks
     PM[usePushMidi<br/>IAC/keyboard + demo]
-    AB[useAbleton<br/>M4L WebSocket]
+    AB[useAbleton<br/>M4L WebSocket<br/>notes per track]
     KE[useKeyEstimate]
     CH[useChordHistory]
   end
 
   PM -->|heldNotes| IDX[routes/index.tsx<br/>Visualizer]
-  AB -->|heldNotes + transport| IDX
+  AB -->|heldNotes + transport + tracks| IDX
   IDX -->|merged pitches| MUSIC[lib/music.ts<br/>detectChord]
   IDX --> KE
   IDX --> CH
+  MUSIC -->|chord symbol| VOI[lib/voicings.ts<br/>voicingsFor]
   MUSIC --> VIEWS
-  IDX --> VIEWS[PianoView · FretboardView ×2 · NotationView]
+  VOI -->|ranked shapes| VIEWS
+  IDX --> VIEWS[PianoView · FretboardView ×2 · PushView · NotationView]
   AB -.command helpers.-> IDX
 ```
 
@@ -124,7 +132,31 @@ flowchart TD
   views plus header chrome.
 - **`lib/music.ts` / `lib/theory.ts`** — pitch→chord/key detection and roman
   numerals (provider-agnostic, fully tested).
+- **`lib/voicings.ts`** — turns a chord symbol into ranked, playable guitar
+  shapes. See [Chord shapes](#chord-shapes).
 - **`lib/config.ts`** — static MVP config (octave convention, tunings, ranges).
+
+#### Chord shapes
+
+The fretboard's default view answers *where do these notes live* — it lights
+every position matching a held pitch-class. Chord mode answers the guitarist's
+question instead: *what do I grab?*
+
+`voicingsFor(symbol, tuning, fretCount)` searches actual fingerings — a fret or
+a mute per string — at every hand position on the neck, discards what a hand
+can't hold (>4 fingers after barre detection, >4-fret span, inner mutes, missing
+chord tones), and ranks the rest. Scoring is calibrated in *fingers*, with
+penalties for the marks of a search artifact rather than a chord: unisons on
+adjacent strings, crossed voices, two fingers pinned to one fret they can't be
+barred across, inversions of a chord that named no bass. A barre is only chosen
+when it beats using the fingers.
+
+The results are then spread across the neck — shapes within three frets of an
+already-chosen grip are skipped — because the eight best C shapes are otherwise
+eight ways to fret the same open chord. What surfaces is the CAGED system,
+falling out of the search rather than being tabulated: C gives `x32010` /
+`x35553` / `8aa988`, G gives `320003` / `355433`, Am gives `x02210` / `577555`.
+`FretboardView` draws three positions at once, each boxed and labelled.
 
 ---
 
@@ -193,6 +225,62 @@ play/stop toggle.
 See [`max-for-live/README.md`](../max-for-live/README.md) for the device build
 steps and full WebSocket protocol.
 
+### Several tracks at once
+
+A device on one track only ever sees that track's MIDI, so watching a bass line
+and a pad together means a device on each. Every copy runs its own
+`node.script`, and they all want port 17999 — so they elect roles rather than
+letting the first one win and the rest fail silently.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Device on "Keys"
+  participant B as Device on "Bass"
+  participant APP as ChordLens app
+
+  A->>A: listen(17999) → ok
+  Note over A: role = hub
+  B->>B: listen(17999) → EADDRINUSE
+  Note over B: role = satellite
+  B->>A: connect as WebSocket client
+  B->>A: {type:"device", track:{index:3, name:"Bass"}}
+  APP->>A: connect
+  A-->>APP: {type:"tracks", tracks:[Keys, Bass]}
+
+  Note over A,APP: playing
+  A-->>APP: {type:"note", pitch:60, track:0}
+  B->>A: {type:"note", pitch:40, track:3}
+  A-->>APP: {type:"note", pitch:40, track:3}
+
+  Note over A: device removed — port frees
+  B->>B: retry listen(17999) → ok
+  Note over B: promoted to hub
+```
+
+- **Track identity.** `chordlens.v8.js` walks up from `this_device` through
+  `canonical_parent` until it reaches `live_set tracks N` (several hops if the
+  device sits inside a rack), and observes the track's `name` plus the set's
+  `tracks` list so renames and reordering are picked up. `node.script` stamps
+  that index onto every note it publishes.
+- **Relaying.** A satellite forwards only its own `note` and `device` messages.
+  Song-wide state — transport, tempo, key, session — is reported by the hub
+  alone, or the app would get one copy per device.
+- **Failover.** Losing the hub connection puts a satellite back into the
+  election after ~2s; whichever grabs the port becomes the new hub.
+- **Deploying an edit.** Live loads the scripts from *its own copy* of the
+  device in the User Library, not from this repo, so editing them here has no
+  effect until `max-for-live/install-device.sh` copies them across
+  (`--check` reports drift). The device watches its scripts and reloads itself.
+- **Testing.** `max-for-live/test/` runs two real bridges as forked processes
+  with `max-api` stubbed (it exists only inside Node-for-Max), covering
+  election, relaying, deduplication and failover — the behaviour that can't be
+  eyeballed inside Ableton. `npm test` in that folder.
+
+On the app side, notes are kept per track (`applyNote` / `heldFor` in
+`lib/ableton.ts`), and a **`TrackTabs`** bar appears above the views once a
+second device shows up: follow one track, or fold them all into one chord.
+
 ### Path B — AbletonMCP socket (LLM / scripting)
 
 [AbletonMCP](https://github.com/ahujasid/ableton-mcp) is an **independent**
@@ -250,9 +338,10 @@ JSON, one object per message. The server is **dependency-free** — implemented
 with Node's built-in `http` + `crypto` (no `ws`, no `node_modules`). Authoritative
 reference in [`max-for-live/README.md`](../max-for-live/README.md).
 
-- **Device → app events:** `hello`, `note`, `transport`, `tempo`, `key`,
-  `session`, `pong`, `error`. (`key` = `{rootPc, scaleName}`; `session` includes
-  `rootPc`/`scaleName`.)
+- **Device → app events:** `hello`, `note`, `tracks`, `transport`, `tempo`,
+  `key`, `session`, `pong`, `error`. (`note` carries the `track` index it came
+  from, or `null`; `tracks` is the roster of tracks feeding the hub; `key` =
+  `{rootPc, scaleName}`; `session` includes `rootPc`/`scaleName`.)
 - **App → device commands:** `get_session`, `set_tempo`, `start_playback`,
   `stop_playback`, `create_midi_track`, `set_track_name`, `fire_clip`,
   `stop_clip`, `get_track_info`, `ping`. An optional numeric `id` yields a
@@ -277,18 +366,21 @@ first-ableton-app/
 │     │  ├─ usePushMidi.ts        # IAC/keyboard + demo note source
 │     │  └─ useAbleton.ts         # Max for Live WebSocket bridge (React)
 │     ├─ lib/
-│     │  ├─ ableton.ts            # AbletonBridge WebSocket client + types
+│     │  ├─ ableton.ts            # AbletonBridge client, types, per-track notes
 │     │  ├─ music.ts / theory.ts  # chord/key detection (pure, tested)
+│     │  ├─ voicings.ts           # chord symbol → ranked playable guitar shapes
 │     │  └─ config.ts             # static MVP config
 │     └─ components/
 │        ├─ AbletonStatus.tsx     # header chip: connection + tempo + transport
 │        ├─ StatusIndicator.tsx   # MIDI input status
-│        └─ {Piano,Fretboard,Notation}View.tsx, …
+│        ├─ TrackTabs.tsx         # which Ableton track the views follow
+│        └─ {Piano,Fretboard,Push,Notation}View.tsx, …
 ├─ max-for-live/                  # the Ableton-side device (Path A)
 │  ├─ ChordLens.maxpat            # patch wiring (assemble → ChordLens.amxd)
-│  ├─ chordlens.v8.js             # LiveAPI: observe transport/tempo/key + control (v8)
-│  ├─ chordlens.server.js         # dependency-free WebSocket server + bridge (node.script)
-│  ├─ package.json                # metadata only (no dependencies)
+│  ├─ chordlens.v8.js             # LiveAPI: observe transport/tempo/key + track identity (v8)
+│  ├─ chordlens.server.js         # dependency-free WebSocket server, hub/satellite (node.script)
+│  ├─ test/                       # two real bridges, max-api stubbed (`npm test`)
+│  ├─ package.json                # metadata + test script (no dependencies)
 │  └─ README.md                   # device build steps + protocol
 ├─ docs/                          # this documentation
 └─ resources/                     # product / requirements / spec notes
@@ -309,6 +401,16 @@ first-ableton-app/
   WebSocket hosting lives in `node.script`; they bridge over Max messages.
 - **Merged note sources.** The visualizer is agnostic to where notes come from,
   so keyboard, demo, and the M4L device all "just work" and even combine.
+- **Devices elect a hub instead of competing for the port.** One fixed port is
+  what makes the app's connection simple; having the losers join the winner
+  keeps that simplicity while still supporting a device per track. The
+  alternative — a port per device — would push discovery into the app.
+- **Notes are bucketed per track, not pooled.** A bass line and a pad arriving
+  together are two parts; pooling them would read as one nine-note chord.
+- **Chord shapes are searched, not tabulated.** A shape dictionary would only
+  cover the chords someone thought to enter; searching real fingerings and
+  scoring them for playability handles any symbol `tonal` can parse, including
+  slash chords and extensions.
 - **Auto-reconnecting bridge.** `AbletonBridge` retries, so app/Ableton launch
   order doesn't matter and the UI degrades gracefully when Live is closed.
 - **Local-only by default.** Both the WebSocket (`127.0.0.1`) and the MCP socket
@@ -324,9 +426,11 @@ To run the full system:
    README) — it's dependency-free, so there's **no `npm install`**. Optionally
    **Freeze** it for a portable, self-contained device.
 2. **In Ableton:** drop `ChordLens.amxd` on a MIDI track; the Max console should
-   print `ChordLens WebSocket listening on ws://127.0.0.1:17999`.
+   print `ChordLens hub listening on ws://127.0.0.1:17999 (track 0: …)`. Add it
+   to more tracks to watch them too — those print
+   `joining it as a satellite`, which is the healthy path, not an error.
 3. **Run the app:** `cd chordlens-app && npm run desktop` (native MIDI) or
    `npm run dev` (browser; WebSocket bridge + demo only).
 4. The `AbletonStatus` chip connects automatically; play into the device or a
-   selected MIDI input and the views light up.
-```
+   selected MIDI input and the views light up. With devices on more than one
+   track, the tab bar above the views chooses which one they follow.

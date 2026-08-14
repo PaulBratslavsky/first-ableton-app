@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   shapeWindowPositions,
   autoAnchor,
@@ -6,7 +6,9 @@ import {
   noteName,
   pitchClass,
 } from '../lib/music'
+import { voicingsFor, MUTED, type Voicing } from '../lib/voicings'
 import { pitchColor, textOn } from '../lib/colors'
+import { SectionHead } from './SectionHead'
 import { NOTE_NAMES } from '../lib/config'
 
 // Geometry.
@@ -16,9 +18,19 @@ const FRET_W = 40
 const STRING_GAP = 26
 const PAD_Y = 22
 const DOT_R = 9
+/** Scale-guide dot. Big enough to trace the shape at a glance, small enough
+ *  that a played note still reads as the louder mark. */
+const SCALE_DOT_R = 5.5
 
 // Frets shown per position box (a hand span). base..base+SPAN inclusive.
 const SPAN = 4
+
+/**
+ * Chord shapes drawn at once. Three positions is what a guitarist wants in
+ * front of them — the one at the nut, and the two nearest grips up the neck —
+ * so you can reach for whichever your hand is closest to instead of flipping.
+ */
+const VISIBLE_SHAPES = 3
 
 const INLAY_FRETS = new Set([3, 5, 7, 9, 15])
 const DOUBLE_INLAY = 12
@@ -34,6 +46,22 @@ interface Props {
   scaleGuide?: Set<number> | null
   /** Spell note labels as flats to match the detected key. */
   useFlats?: boolean
+  /**
+   * Detected chord symbol. Supplying it offers "Chord" mode, which replaces the
+   * note-location dots with ranked, playable shapes. Omit to leave the view as
+   * a pure note map (the bass has no use for chord grips).
+   */
+  chordSymbol?: string | null
+  /**
+   * Name every position on the neck, not just the lit ones. Always spelled
+   * with sharps — the overlay is a fixed map of the neck, not a reading of the
+   * current key.
+   */
+  showNames?: boolean
+  onToggleNames?: () => void
+  /** Whether the neck is showing. Omit `onToggle` for a fixed header. */
+  open?: boolean
+  onToggle?: () => void
 }
 
 export function FretboardView({
@@ -44,6 +72,11 @@ export function FretboardView({
   keyPcs,
   scaleGuide,
   useFlats = false,
+  chordSymbol,
+  showNames = false,
+  onToggleNames,
+  open = true,
+  onToggle,
 }: Props) {
   const strings = tuning.length
   const nutX = LABEL_W + OPEN_W
@@ -54,6 +87,27 @@ export function FretboardView({
   const stringY = (s: number) => PAD_Y + (strings - 1 - s) * STRING_GAP
   const fretCenterX = (f: number) =>
     f === 0 ? LABEL_W + OPEN_W / 2 : nutX + (f - 0.5) * FRET_W
+
+  // --- Chord mode: ranked shapes you can actually grab. ---
+  const offersChords = chordSymbol !== undefined
+  const [chordOn, setChordOn] = useState(false)
+  const [shapeOffset, setShapeOffset] = useState(0)
+  const shapes = useMemo(
+    () => (chordSymbol ? voicingsFor(chordSymbol, tuning, fretCount) : []),
+    [chordSymbol, tuning, fretCount],
+  )
+  // A new chord starts you back at the nut.
+  useEffect(() => setShapeOffset(0), [chordSymbol])
+  const chordActive = chordOn && shapes.length > 0
+  const maxOffset = Math.max(0, shapes.length - VISIBLE_SHAPES)
+  const offset = Math.min(shapeOffset, maxOffset)
+  const visibleShapes = chordActive
+    ? shapes.slice(offset, offset + VISIBLE_SHAPES)
+    : []
+
+  /** Open grips are played at the nut whatever fret they happen to stop. */
+  const isOpenShape = (v: Voicing) => v.frets.includes(0)
+  const shapeName = (v: Voicing) => (isOpenShape(v) ? 'open' : `fr ${v.position}`)
 
   // --- Position window: show the chord as one playable box, not scattered. ---
   const [autoMode, setAutoMode] = useState(true)
@@ -86,42 +140,99 @@ export function FretboardView({
     (p) => !litKeys.has(`${p.string}-${p.fret}`),
   )
 
+  // The arrows slide the trio of shapes along the neck in chord mode, and the
+  // position window otherwise.
   const move = (delta: number) => {
+    if (chordActive) {
+      setShapeOffset(Math.min(maxOffset, Math.max(0, offset + delta)))
+      return
+    }
     setShowAll(false)
     setAutoMode(false)
     setManualBase(Math.min(maxBase, Math.max(0, base + delta)))
   }
 
+  const atStart = chordActive ? offset <= 0 : !showAll && base <= 0
+  const atEnd = chordActive ? offset >= maxOffset : !showAll && base >= maxBase
+
+  /**
+   * Horizontal extent of a shape's box: the fret cells its stopped notes
+   * occupy, reaching back to the nut whenever it rings an open string.
+   */
+  const shapeBox = (v: Voicing) => {
+    const fretted = v.frets.filter((f) => f > 0)
+    const hi = fretted.length ? Math.max(...fretted) : 0
+    return {
+      x1: isOpenShape(v) ? LABEL_W : nutX + (v.position - 1) * FRET_W,
+      x2: hi === 0 ? nutX : nutX + hi * FRET_W,
+    }
+  }
+
+  const positionLabel = chordActive
+    ? visibleShapes.map(shapeName).join(' · ')
+    : showAll
+      ? 'all'
+      : base === 0
+        ? 'open'
+        : `fr ${base}–${base + SPAN}`
+
   return (
     <figure className="fretboard">
-      <figcaption className="view-title view-title--row">
-        <span>{label}</span>
+      <SectionHead
+        title={
+          <>
+            {label}
+            {chordActive && chordSymbol && (
+              <span className="fb-chord-name">{chordSymbol}</span>
+            )}
+          </>
+        }
+        open={open}
+        onToggle={onToggle}
+        controls={`${label.toLowerCase()}-neck`}
+      >
         <span className="fb-pos">
           <button
             type="button"
             className="fb-pos-btn"
             onClick={() => move(-1)}
-            disabled={!showAll && base <= 0}
-            aria-label="Move position down the neck"
+            disabled={atStart}
+            aria-label={
+              chordActive ? 'Previous shapes' : 'Move position down the neck'
+            }
           >
             ◀
           </button>
-          <span className="fb-pos-label">
-            {showAll ? 'all' : base === 0 ? 'open' : `fr ${base}–${base + SPAN}`}
-          </span>
+          <span className="fb-pos-label">{positionLabel}</span>
           <button
             type="button"
             className="fb-pos-btn"
             onClick={() => move(1)}
-            disabled={!showAll && base >= maxBase}
-            aria-label="Move position up the neck"
+            disabled={atEnd}
+            aria-label={chordActive ? 'Next shapes' : 'Move position up the neck'}
           >
             ▶
           </button>
+          {offersChords && (
+            <button
+              type="button"
+              className={`fb-pos-auto${chordActive ? ' fb-pos-auto--on' : ''}`}
+              onClick={() => setChordOn((v) => !v)}
+              disabled={shapes.length === 0}
+              title={
+                shapes.length === 0
+                  ? 'Play a recognisable chord to see shapes for it'
+                  : 'Show playable chord shapes instead of every matching note'
+              }
+            >
+              Chord
+            </button>
+          )}
           <button
             type="button"
-            className={`fb-pos-auto${autoMode && !showAll ? ' fb-pos-auto--on' : ''}`}
+            className={`fb-pos-auto${autoMode && !showAll && !chordActive ? ' fb-pos-auto--on' : ''}`}
             onClick={() => {
+              setChordOn(false)
               setShowAll(false)
               setAutoMode(true)
             }}
@@ -131,16 +242,20 @@ export function FretboardView({
           </button>
           <button
             type="button"
-            className={`fb-pos-auto${showAll ? ' fb-pos-auto--on' : ''}`}
-            onClick={() => setShowAll(true)}
+            className={`fb-pos-auto${showAll && !chordActive ? ' fb-pos-auto--on' : ''}`}
+            onClick={() => {
+              setChordOn(false)
+              setShowAll(true)
+            }}
             title="Show the chord across the whole neck"
           >
             All
           </button>
           <button
             type="button"
-            className={`fb-pos-auto${onePerNote ? ' fb-pos-auto--on' : ''}`}
+            className={`fb-pos-auto${onePerNote && !chordActive ? ' fb-pos-auto--on' : ''}`}
             onClick={() => setOnePerNote((v) => !v)}
+            disabled={chordActive}
             title={
               onePerNote
                 ? 'Showing one dot per note — click for every fretting position in the box'
@@ -149,9 +264,21 @@ export function FretboardView({
           >
             1×
           </button>
+          {onToggleNames && (
+            <button
+              type="button"
+              className={`fb-pos-auto${showNames ? ' fb-pos-auto--on' : ''}`}
+              onClick={onToggleNames}
+              title="Name every note on the neck"
+            >
+              Names
+            </button>
+          )}
         </span>
-      </figcaption>
+      </SectionHead>
+      {open && (
       <svg
+        id={`${label.toLowerCase()}-neck`}
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
@@ -166,8 +293,9 @@ export function FretboardView({
           className="fb-surface"
         />
 
-        {/* Position-window highlight (hidden in "All" mode). */}
-        {!showAll &&
+        {/* Position-window highlight (hidden in "All" and chord modes). */}
+        {!chordActive &&
+          !showAll &&
           (() => {
             const x1 = base === 0 ? LABEL_W : nutX + base * FRET_W
             const x2 = nutX + Math.min(fretCount, base + SPAN) * FRET_W
@@ -181,6 +309,28 @@ export function FretboardView({
               />
             )
           })()}
+
+        {/* One labelled box per chord shape. Grips at neighbouring positions
+            overlap on the neck, so they're outlined and named rather than
+            filled — three tinted blocks would merge into one. */}
+        {visibleShapes.map((v, i) => {
+          const box = shapeBox(v)
+          return (
+            <g key={`box-${v.frets.join(',')}`} className={`fb-shape fb-shape--${i}`}>
+              <rect
+                x={box.x1}
+                y={PAD_Y - 7}
+                width={box.x2 - box.x1}
+                height={(strings - 1) * STRING_GAP + 14}
+                rx={7}
+                className="fb-shape-box"
+              />
+              <text x={box.x1 + 5} y={PAD_Y - 11} className="fb-shape-label">
+                {shapeName(v)}
+              </text>
+            </g>
+          )
+        })}
 
         {/* Inlay markers (centered vertically). */}
         {Array.from({ length: fretCount }, (_, i) => i + 1).map((f) => {
@@ -238,20 +388,105 @@ export function FretboardView({
           )
         })}
 
-        {/* Faint scale guide within the position. */}
-        {scaleDots.map(({ string, fret }) => (
+        {/* Barre bars, drawn under the dots so the note labels stay on top. */}
+        {visibleShapes.map(
+          (v) =>
+            v.barre && (
+              <rect
+                key={`barre-${v.frets.join(',')}`}
+                x={fretCenterX(v.barre.fret) - DOT_R}
+                y={stringY(v.barre.to) - DOT_R}
+                width={DOT_R * 2}
+                height={stringY(v.barre.from) - stringY(v.barre.to) + DOT_R * 2}
+                rx={DOT_R}
+                className="fb-barre"
+              />
+            ),
+        )}
+
+        {/* Every note on the neck, named. Drawn under the dots so a lit note
+            keeps its own label. */}
+        {showNames &&
+          tuning.flatMap((open, string) =>
+            Array.from({ length: fretCount + 1 }, (_, fret) => {
+              // The scale guide's dots would sit behind these labels, so the
+              // key is carried by the lettering instead.
+              const inKey = scaleGuide?.has(pitchClass(open + fret)) ?? false
+              return (
+                <text
+                  key={`name-${string}-${fret}`}
+                  x={fretCenterX(fret)}
+                  y={stringY(string)}
+                  className={`fb-name${inKey ? ' fb-name--in-key' : ''}`}
+                >
+                  {noteName(open + fret).replace(/[0-9]/g, '')}
+                </text>
+              )
+            }),
+          )}
+
+        {/* Faint scale guide within the position (noise next to a chord shape). */}
+        {!chordActive && !showNames && scaleDots.map(({ string, fret }) => (
           <circle
             key={`scale-${string}-${fret}`}
             cx={fretCenterX(fret)}
             cy={stringY(string)}
-            r={3.2}
+            r={SCALE_DOT_R}
             className="fb-scale-dot"
             style={{ fill: pitchColor(tuning[string] + fret) }}
           />
         ))}
 
-        {/* Lit note positions (the chord shape in this box). */}
-        {lit.map(({ string, fret }) => {
+        {/* Strings each shape doesn't play, marked at that shape's own box. */}
+        {visibleShapes.flatMap((v) => {
+          const key = v.frets.join(',')
+          const x = isOpenShape(v) ? fretCenterX(0) : shapeBox(v).x1 - 9
+          return v.frets.flatMap((fret, string) =>
+            fret === MUTED
+              ? [
+                  <text
+                    key={`mute-${key}-${string}`}
+                    x={x}
+                    y={stringY(string)}
+                    className="fb-mute"
+                  >
+                    ×
+                  </text>,
+                ]
+              : [],
+          )
+        })}
+
+        {/* Chord-shape dots — every visible shape at once. */}
+        {visibleShapes.flatMap((v) =>
+          v.frets.flatMap((fret, string) => {
+            if (fret === MUTED) return []
+            const pitch = tuning[string] + fret
+            const color = pitchColor(pitch)
+            return [
+              <g key={`shape-${v.frets.join(',')}-${string}`}>
+                <circle
+                  cx={fretCenterX(fret)}
+                  cy={stringY(string)}
+                  r={DOT_R}
+                  className="fb-note"
+                  style={{ fill: color }}
+                />
+                <text
+                  x={fretCenterX(fret)}
+                  y={stringY(string)}
+                  className="fb-note-label"
+                  style={{ fill: textOn(color) }}
+                >
+                  {noteName(pitch, useFlats).replace(/[0-9]/g, '')}
+                </text>
+              </g>,
+            ]
+          }),
+        )}
+
+        {/* Note-location dots (the default view). */}
+        {!chordActive && lit.map(({ string, fret }) => {
           const pitch = tuning[string] + fret
           const color = pitchColor(pitch)
           const outside = keyPcs != null && !keyPcs.has(pitchClass(pitch))
@@ -276,6 +511,7 @@ export function FretboardView({
           )
         })}
       </svg>
+      )}
     </figure>
   )
 }
